@@ -912,10 +912,11 @@ class wmxml {
 
 
     /**
-     * XML: X15 [1,2], просмотр и изменение текущих настроек управления "по доверию"
-     * [1]: получение списка кошельков, управление которыми доверяет, идентификатор, совершающий запрос;
-     * [2]: получение списка идентификаторов и их кошельков, которые доверяют, идентификатору, совершающему запрос;
-     * [3]: создание или изменение настроек доверия для определённого кошелька или идентификатора;
+     * XML: X15 [11,12], просмотр и изменение текущих настроек управления "по доверию"
+     * [11]: получение списка кошельков, управление которыми доверяет, идентификатор, совершающий запрос;
+     * [12]: получение списка идентификаторов и их кошельков, которые доверяют, идентификатору, совершающему запрос;
+     * [2]: создание или изменение настроек доверия для определённого кошелька или идентификатора;
+     * @param  string $wmid если необходимо просмотреть свои настройки, то указывать этот параметр не надо
      * @return array
      */
     public function xml151($wmid = null) {
@@ -940,10 +941,10 @@ class wmxml {
         # если нет WMID - используем XMLTrustList.asp
         # если есть WMID - используем XMLTrustList2.asp
         if (!$wmid) {
-            $xml = $this->getObject("151", $xml);
+            $xml = $this->getObject("1511", $xml);
         }
         else {
-            $xml = $this->getObject("152", $xml);
+            $xml = $this->getObject("1512", $xml);
         }
 
         $trustlist = [];
@@ -954,6 +955,7 @@ class wmxml {
                 'is_trans'     => ((int) $trust['trans']) ? true : false,
                 'is_purse'     => ((int) $trust['purse']) ? true : false,
                 'is_transhist' => ((int) $trust['transhist']) ? true : false,
+                'master'       => (string) $trust->master,
                 'purse'        => (string) $trust->purse,
                 'daylimit'     => (float) $trust->daylimit,
                 'dlimit'       => (float) $trust->dlimit,
@@ -968,6 +970,58 @@ class wmxml {
         }
 
         return $trustlist;
+    }
+
+    /**
+     * XML: X15 [2], создание или изменение настроек доверия для определённого кошелька или идентификатора
+     * [11]: получение списка кошельков, управление которыми доверяет, идентификатор, совершающий запрос;
+     * [12]: получение списка идентификаторов и их кошельков, которые доверяют, идентификатору, совершающему запрос;
+     * [2]: создание или изменение настроек доверия для определённого кошелька или идентификатора;
+     * @param  boolean $is_inv       разрешить(1) или нет(0) идентификатору в теге masterwmid выпиcывать счета на доверяемый кошелек purse
+     * @param  boolean $is_trans     разрешить(1) или нет(0) идентификатору в теге masterwmid переводы средств по доверию с доверяемого кошелька purse
+     * @param  boolean $is_purse     разрешить(1) или нет(0) идентификатору в теге masterwmid просмотр баланса на доверяемом кошельке purse
+     * @param  boolean $is_transhist разрешить(1) или нет(0) идентификатору в теге masterwmid просмотр истории операций кошелька purse
+     * @param  string  $masterwmid   WMID, которому мы данным запросом разрешает или запрещает управление своим кошельком slavepurse
+     * @param  string  $purse        наш кошелёк, на который устанавливается доверие
+     * @param  double  $limit        суточный лимит
+     * @param  double  $daylimit     дневной лимит
+     * @param  double  $weeklimit    недельный лимит
+     * @param  double  $monthlimit   месячный лимит
+     * @return array
+     */
+    public function xml152($is_inv = 0, $is_trans = 0, $is_purse = 0, $is_transhist = 0, $masterwmid, $purse, $limit = 0, $daylimit = 0, $weeklimit = 0, $monthlimit = 0) {
+        $reqn = $this->getReqn();
+        $sign = $this->getSign($this->wmid.$purse.$masterwmid.$reqn);
+
+        $xml = '
+            <w3s.request>
+                <reqn>'.$reqn.'</reqn>
+                <wmid>'.$this->wmid.'</wmid>
+                <sign>'.$sign.'</sign>
+                <trust inv="'.$is_inv.'" trans="'.$is_trans.'" purse="'.$is_purse.'" transhist="'.$is_transhist.'">
+                    <masterwmid>'.$masterwmid.'</masterwmid>
+                    <slavewmid>'.$this->wmid.'</slavewmid>
+                    <purse>'.$purse.'</purse>
+                    <limit>'.$limit.'</limit>
+                    <daylimit>'.$daylimit.'</daylimit>
+                    <weeklimit>'.$weeklimit.'</weeklimit>
+                    <monthlimit>'.$monthlimit.'</monthlimit>
+                </trust>
+            </w3s.request>
+        ';
+
+        # получаем подпарщенный XML-пакет
+        $xml = $this->getObject("152", $xml);
+
+        return [
+            'id'           => (int) $xml->trust['id'],
+            'is_inv'       => ((int) $xml->trust['inv']) ? true : false,
+            'is_trans'     => ((int) $xml->trust['trans']) ? true : false,
+            'is_purse'     => ((int) $xml->trust['purse']) ? true : false,
+            'is_transhist' => ((int) $xml->trust['transhist']) ? true : false,
+            'purse'        => (string) $xml->trust->purse,
+            'master'       => (string) $xml->trust->master,
+        ];
     }
 
     /**
@@ -1291,9 +1345,9 @@ class wmxml {
                 "11"    =>  "https://passport.webmoney.ru/asp/XMLGetWMPassport.asp",
                 "13"    =>  "https://w3s.webmoney.ru/asp/XMLRejectProtect.asp",
                 "14"    =>  "https://w3s.webmoney.ru/asp/XMLTransMoneyback.asp",
-                "151"   =>  "https://w3s.webmoney.ru/asp/XMLTrustList.asp",
-                "152"   =>  "https://w3s.webmoney.ru/asp/XMLTrustList2.asp",
-                "153"   =>  "https://w3s.webmoney.ru/asp/XMLTrustSave2.asp",
+                "1511"   =>  "https://w3s.webmoney.ru/asp/XMLTrustList.asp",
+                "1512"   =>  "https://w3s.webmoney.ru/asp/XMLTrustList2.asp",
+                "152"   =>  "https://w3s.webmoney.ru/asp/XMLTrustSave2.asp",
                 "16"    =>  "https://w3s.webmoney.ru/asp/XMLCreatePurse.asp",
                 "171"   =>  "https://arbitrage.webmoney.ru/xml/X17_CreateContract.aspx",
                 "172"   =>  "https://arbitrage.webmoney.ru/xml/X17_GetContractInfo.aspx",
