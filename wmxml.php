@@ -912,19 +912,18 @@ class wmxml {
 
 
     /**
-     * XML: X15 [1], просмотр и изменение текущих настроек управления "по доверию"
+     * XML: X15 [1,2], просмотр и изменение текущих настроек управления "по доверию"
      * [1]: получение списка кошельков, управление которыми доверяет, идентификатор, совершающий запрос;
      * [2]: получение списка идентификаторов и их кошельков, которые доверяют, идентификатору, совершающему запрос;
      * [3]: создание или изменение настроек доверия для определённого кошелька или идентификатора;
-     * @param  integer $wmtranid      номер транзакции (целое положительное число) по внутреннему учету WebMoney Transfer (wmtranid), которую необходимо вернуть, при этом тип этой транзакции должен быть - обычная (opertype=0)
-     * @param  double $amount         сумма, которую необходимо вернуть, она не может превышать исходную сумму входящей транзакции
-     * @param  integer $moneybackphone телефон покупателя 
-     * @param  string $capitallerpursesrc кошелек капиталлера
      * @return array
      */
-    public function xml151() {
+    public function xml151($wmid = null) {
+        # в зависимости от того передан нам WMID или нет - используем разные интерфейсы
+        $iwmid = ($wmid) ? $wmid : $this->wmid;
+
         $reqn = $this->getReqn();
-        $sign = $this->getSign($this->wmid.$reqn);
+        $sign = $this->getSign($iwmid.$reqn);
 
         $xml = '
             <w3s.request>
@@ -932,13 +931,20 @@ class wmxml {
                 <wmid>'.$this->wmid.'</wmid>
                 <sign>'.$sign.'</sign>
                 <gettrustlist>
-                    <wmid>'.$this->wmid.'</wmid>
+                    <wmid>'.$iwmid.'</wmid>
                 </gettrustlist>
             </w3s.request>
         ';
 
-        # получаем подпарщенный XML-пакет 
-        $xml = $this->getObject("151", $xml);
+        # получаем подпарщенный XML-пакет
+        # если нет WMID - используем XMLTrustList.asp
+        # если есть WMID - используем XMLTrustList2.asp
+        if (!$wmid) {
+            $xml = $this->getObject("151", $xml);
+        }
+        else {
+            $xml = $this->getObject("152", $xml);
+        }
 
         $trustlist = [];
         foreach ($xml->trustlist->trust as $trust) {
