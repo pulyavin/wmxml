@@ -910,6 +910,60 @@ class wmxml {
         ];
     }
 
+
+    /**
+     * XML: X15 [1], просмотр и изменение текущих настроек управления "по доверию"
+     * [1]: получение списка кошельков, управление которыми доверяет, идентификатор, совершающий запрос;
+     * [2]: получение списка идентификаторов и их кошельков, которые доверяют, идентификатору, совершающему запрос;
+     * [3]: создание или изменение настроек доверия для определённого кошелька или идентификатора;
+     * @param  integer $wmtranid      номер транзакции (целое положительное число) по внутреннему учету WebMoney Transfer (wmtranid), которую необходимо вернуть, при этом тип этой транзакции должен быть - обычная (opertype=0)
+     * @param  double $amount         сумма, которую необходимо вернуть, она не может превышать исходную сумму входящей транзакции
+     * @param  integer $moneybackphone телефон покупателя 
+     * @param  string $capitallerpursesrc кошелек капиталлера
+     * @return array
+     */
+    public function xml151() {
+        $reqn = $this->getReqn();
+        $sign = $this->getSign($this->wmid.$reqn);
+
+        $xml = '
+            <w3s.request>
+                <reqn>'.$reqn.'</reqn>
+                <wmid>'.$this->wmid.'</wmid>
+                <sign>'.$sign.'</sign>
+                <gettrustlist>
+                    <wmid>'.$this->wmid.'</wmid>
+                </gettrustlist>
+            </w3s.request>
+        ';
+
+        # получаем подпарщенный XML-пакет 
+        $xml = $this->getObject("151", $xml);
+
+        $trustlist = [];
+        foreach ($xml->trustlist->trust as $trust) {
+            $trustlist[] = [
+                'id'           => (int) $trust['id'],
+                'is_inv'       => ((int) $trust['inv']) ? true : false,
+                'is_trans'     => ((int) $trust['trans']) ? true : false,
+                'is_purse'     => ((int) $trust['purse']) ? true : false,
+                'is_transhist' => ((int) $trust['transhist']) ? true : false,
+                'purse'        => (string) $trust->purse,
+                'daylimit'     => (float) $trust->daylimit,
+                'dlimit'       => (float) $trust->dlimit,
+                'wlimit'       => (float) $trust->wlimit,
+                'mlimit'       => (float) $trust->mlimit,
+                'dsum'         => (float) $trust->dsum,
+                'wsum'         => (float) $trust->wsum,
+                'msum'         => (float) $trust->msum,
+                'lastsumdate'  => (string) $trust->lastsumdate,
+                'storeswmid'   => (string) $trust->storeswmid,
+            ];
+        }
+
+        return $trustlist;
+    }
+
     /**
      * UnDocumented: возвращает BL
      * @param  [type] $wmid доверенный wmid
