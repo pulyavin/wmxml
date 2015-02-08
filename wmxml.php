@@ -23,6 +23,9 @@ class wmxml {
     const STATE_PROTECT = 1; # оплачен по протекции
     const STATE_PAID = 2; # оплачен окончательно
     const STATE_DENIED = 3; # отказан
+    # типы контракторв в арбитраже
+    const CONTRACT_PUBLIC = 1;
+    const CONTRACT_PRIVATE = 2;
 
     /**
      * иницализация объекта
@@ -1072,48 +1075,41 @@ class wmxml {
      * XML: X17 [2], операции с арбитражными контрактами
      * [1]: создание контрактов;
      * [2]: информация об акцептантах;
-     * @param  string $name       краткое (не более 255 символов) название контракта 
-     * @param  integer $ctype      ctype=1 - контракт с открытым доступом, ctype=2 - контракт с ограниченным доступом
-     * @param  string $text       собственно текст документа. Для разделения строк в тексте документа используйте: \r\n
-     * @param  array  $accesslist для ctype=2 - массив WMID участников, которым разрешается акцептовывать данный контракт
+     * @param  integer $contractid      номер контракта
      * @return array
      */
     public function xml172($contractid) {
         # для получения информации об акцептантах всегда указывать mode=acceptdate
-        $mode = 'contractid';
+        $mode = 'acceptdate';
 
         $sign = $this->getSign($contractid.$mode);
 
         $xml = '
-<contract.request>
-    <wmid>'.$this->wmid.'</wmid>
-    <contractid>'.$contractid.'</contractid>
-    <mode>acceptdate</mode>
-    <sign>'.$sign.'</sign>
-</contract.request>
-
             <contract.request>
-                <sign_wmid>'.$this->wmid.'</sign_wmid>
-                <name>'.$name.'</name>
-                <ctype>'.$ctype.'</ctype>
-                <text><![CDATA['.$text.']]></text>
+                <wmid>'.$this->wmid.'</wmid>
+                <contractid>'.$contractid.'</contractid>
+                <mode>'.$mode.'</mode>
                 <sign>'.$sign.'</sign>
-                <accesslist>
-                    ';
-                    foreach ($accesslist as $wmid) {
-                        $xml .= '<wmid>'.$wmid.'</wmid>';
-                    }
-                    $xml .= '
-                </accesslist>
             </contract.request>
         ';
 
         # получаем подпарщенный XML-пакет
-        $xml = $this->getObject("171", $xml);
+        $xml = $this->getObject("172", $xml);
 
-        return [
-            'contractid'    => (int) $xml->contractid,
-        ];
+        $contractinfo = [];
+        foreach ($xml->contractinfo->row as $contract) {
+            $contractinfo[] = [
+                'contractid'     => (int) $contract['contractid'],
+                'wmid'           => (string) $contract['wmid'],
+                'acceptdate'     => (string) $contract['acceptdate'],
+                'signature'      => (string) $contract['signature'],
+                'smsacceptcode'  => (int) $contract['smsacceptcode'],
+                'smsacceptphone' => (string) $contract['smsacceptphone'],
+                'smsacceptdate'  => (string) $contract['smsacceptdate'],
+            ];
+        }
+
+        return $contractinfo;
     }
 
     /**
