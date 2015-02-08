@@ -1386,7 +1386,7 @@ class wmxml {
      * @return string
      */
     private function getSign($string) {
-        # если это WebMoney Keeper WebPro, то подписываеть ему ничего не надо
+        # если это WebMoney Keeper WebPro, то подписывать ему ничего не надо
         if ($this->keeper == "light") {
             return;
         }
