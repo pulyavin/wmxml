@@ -1025,6 +1025,98 @@ class wmxml {
     }
 
     /**
+     * XML: X17 [1], операции с арбитражными контрактами
+     * [1]: создание контрактов;
+     * [2]: информация об акцептантах;
+     * @param  string $name       краткое (не более 255 символов) название контракта 
+     * @param  integer $ctype      ctype=1 - контракт с открытым доступом, ctype=2 - контракт с ограниченным доступом
+     * @param  string $text       собственно текст документа. Для разделения строк в тексте документа используйте: \r\n
+     * @param  array  $accesslist для ctype=2 - массив WMID участников, которым разрешается акцептовывать данный контракт
+     * @return array
+     */
+    public function xml171($name, $ctype, $text, array $accesslist = []) {
+        $name =   htmlspecialchars(trim($name), ENT_QUOTES);
+        $text =   htmlspecialchars(trim($text), ENT_QUOTES);
+
+        # ебануться, грёбанный полаллен!
+        $name_temp  = mb_convert_encoding($name, "CP1251", "UTF-8");
+
+        $sign = $this->getSign($this->wmid.mb_strlen($name_temp).$ctype);
+
+        $xml = '
+            <contract.request>
+                <sign_wmid>'.$this->wmid.'</sign_wmid>
+                <name>'.$name.'</name>
+                <ctype>'.$ctype.'</ctype>
+                <text><![CDATA['.$text.']]></text>
+                <sign>'.$sign.'</sign>
+                <accesslist>
+                    ';
+                    foreach ($accesslist as $wmid) {
+                        $xml .= '<wmid>'.$wmid.'</wmid>';
+                    }
+                    $xml .= '
+                </accesslist>
+            </contract.request>
+        ';
+
+        # получаем подпарщенный XML-пакет
+        $xml = $this->getObject("171", $xml);
+
+        return [
+            'contractid'    => (int) $xml->contractid,
+        ];
+    }
+
+    /**
+     * XML: X17 [2], операции с арбитражными контрактами
+     * [1]: создание контрактов;
+     * [2]: информация об акцептантах;
+     * @param  string $name       краткое (не более 255 символов) название контракта 
+     * @param  integer $ctype      ctype=1 - контракт с открытым доступом, ctype=2 - контракт с ограниченным доступом
+     * @param  string $text       собственно текст документа. Для разделения строк в тексте документа используйте: \r\n
+     * @param  array  $accesslist для ctype=2 - массив WMID участников, которым разрешается акцептовывать данный контракт
+     * @return array
+     */
+    public function xml172($contractid) {
+        # для получения информации об акцептантах всегда указывать mode=acceptdate
+        $mode = 'contractid';
+
+        $sign = $this->getSign($contractid.$mode);
+
+        $xml = '
+<contract.request>
+    <wmid>'.$this->wmid.'</wmid>
+    <contractid>'.$contractid.'</contractid>
+    <mode>acceptdate</mode>
+    <sign>'.$sign.'</sign>
+</contract.request>
+
+            <contract.request>
+                <sign_wmid>'.$this->wmid.'</sign_wmid>
+                <name>'.$name.'</name>
+                <ctype>'.$ctype.'</ctype>
+                <text><![CDATA['.$text.']]></text>
+                <sign>'.$sign.'</sign>
+                <accesslist>
+                    ';
+                    foreach ($accesslist as $wmid) {
+                        $xml .= '<wmid>'.$wmid.'</wmid>';
+                    }
+                    $xml .= '
+                </accesslist>
+            </contract.request>
+        ';
+
+        # получаем подпарщенный XML-пакет
+        $xml = $this->getObject("171", $xml);
+
+        return [
+            'contractid'    => (int) $xml->contractid,
+        ];
+    }
+
+    /**
      * UnDocumented: возвращает BL
      * @param  [type] $wmid доверенный wmid
      * @return array
