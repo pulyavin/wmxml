@@ -8,7 +8,7 @@ class wmxml
     private $pem;
     private $transid;
     # представление даты в WebMoney
-    private $datePattern = "Ymd h:i:s";
+    private $datePattern = "Ymd H:i:s";
     # тип WebMoney Keeper: WinPro (Classic) или WebPro (Light)
     private $keeper;
     # хэндлер curl
@@ -187,8 +187,8 @@ class wmxml
             'period'       => (int)$xml->invoice->period,
             'expiration'   => (int)$xml->invoice->expiration,
             'state'        => (int)$xml->invoice->state,
-            'datecrt'      => (string)$xml->invoice->datecrt,
-            'dateupd'      => (string)$xml->invoice->dateupd,
+            'datecrt'      => new DateTime((string)$xml->invoice->datecrt),
+            'dateupd'      => new DateTime((string)$xml->invoice->dateupd),
         ];
     }
 
@@ -252,8 +252,8 @@ class wmxml
             'period'    => (int)$xml->operation->period,
             'wminvid'   => (int)$xml->operation->wminvid,
             'desc'      => (string)$xml->operation->desc,
-            'datecrt'   => (string)$xml->operation->datecrt,
-            'dateupd'   => (string)$xml->operation->dateupd,
+            'datecrt'   => new DateTime((string)$xml->operation->datecrt),
+            'dateupd'   => new DateTime((string)$xml->operation->dateupd),
         ];
     }
 
@@ -323,8 +323,8 @@ class wmxml
                 'tranid'    => (int)$operation->tranid,
                 'period'    => (int)$operation->period,
                 'desc'      => (string)$operation->desc,
-                'datecrt'   => (string)$operation->datecrt,
-                'dateupd'   => (string)$operation->dateupd,
+                'datecrt'   => new DateTime((string)$operation->datecrt),
+                'dateupd'   => new DateTime((string)$operation->dateupd),
                 'corrwm'    => (string)$operation->corrwm,
                 'rest'      => (float)$operation->rest,
                 'timelock'  => (string)$operation->timelock,
@@ -381,8 +381,8 @@ class wmxml
                 'customerwmid'  => (string)$invoice->customerwmid,
                 'customerpurse' => (string)$invoice->customerpurse,
                 'amount'        => (float)$invoice->amount,
-                'datecrt'       => (string)$invoice->datecrt,
-                'dateupd'       => (string)$invoice->dateupd,
+                'datecrt'       => new DateTime((string)$invoice->datecrt),
+                'dateupd'       => new DateTime((string)$invoice->dateupd),
                 'state'         => (int)$invoice->state,
                 'address'       => (string)$invoice->address,
                 'desc'          => (string)$invoice->desc,
@@ -426,8 +426,8 @@ class wmxml
         return [
             'id'           => (int)$xml->operation['id'],
             'ts'           => (int)$xml->operation['ts'],
-            'orderid'      => $opertype,
-            'customerwmid' => (string)$xml->operation->dateupd,
+            'opertype'     => $opertype,
+            'dateupd'      => new DateTime((string)$xml->operation->dateupd),
             'success'      => (!$opertype) ? true : false,
         ];
     }
@@ -472,7 +472,7 @@ class wmxml
             'receiverwmid' => (string)$xml->message->receiverwmid,
             'msgsubj'      => (string)$xml->message->msgsubj,
             'msgtext'      => (string)$xml->message->msgtext,
-            'datecrt'      => (string)$xml->message->datecrt,
+            'datecrt'      => new DateTime((string)$xml->message->datecrt),
         ];
     }
 
@@ -654,8 +654,8 @@ class wmxml
                 'storewmid'  => (string)$invoice->storewmid,
                 'storepurse' => (string)$invoice->storepurse,
                 'amount'     => (float)$invoice->amount,
-                'datecrt'    => (string)$invoice->datecrt,
-                'dateupd'    => (string)$invoice->dateupd,
+                'datecrt'    => new DateTime((string)$invoice->datecrt),
+                'dateupd'    => new DateTime((string)$invoice->dateupd),
                 'state'      => (int)$invoice->state,
                 'address'    => (string)$invoice->address,
                 'desc'       => (string)$invoice->desc,
@@ -739,8 +739,8 @@ class wmxml
             'attestat'     => [
                 'tid'          => (int)$xml->certinfo->attestat->row['tid'], # Тип аттестата
                 'recalled'     => (int)$xml->certinfo->attestat->row['recalled'], # Информация об отказе в обслуживании
-                'datecrt'      => (string)$xml->certinfo->attestat->row['datecrt'], # Дата и время (московское) выдачи аттестата
-                'dateupd'      => (string)$xml->certinfo->attestat->row['dateupd'], # Дата и время (московское) последнего изменения данных
+                'datecrt'      => new DateTime((string)$xml->certinfo->attestat->row['datecrt']), # Дата и время (московское) выдачи аттестата
+                'dateupd'      => new DateTime((string)$xml->certinfo->attestat->row['dateupd']), # Дата и время (московское) последнего изменения данных
                 'regnickname'  => (string)$xml->certinfo->attestat->row['regnickname'], # Название проекта, имя (nick) аттестатора, выдавшего данный аттестат
                 'regwmid'      => (string)$xml->certinfo->attestat->row['regwmid'], # WMID аттестатора, выдавшего данный аттестат
                 'status'       => (int)$xml->certinfo->attestat->row['status'], # признак прохождения вторичной проверки (10 - не пройдена, 11 - пройдена)
@@ -756,7 +756,7 @@ class wmxml
                 'fname'      => (string)$xml->certinfo->userinfo->value->row['fname'], # фамилия
                 'iname'      => (string)$xml->certinfo->userinfo->value->row['iname'], # имя
                 'oname'      => (string)$xml->certinfo->userinfo->value->row['oname'], # отчество
-                'bdate_'     => ((int)$xml->certinfo->userinfo->value->row['bday']) . "/" . ((int)$xml->certinfo->userinfo->value->row['bmonth']) . "/" . ((int)$xml->certinfo->userinfo->value->row['byear']), # дата рождения
+                'bdate_'     => (new DateTime())->setDate((int)$xml->certinfo->userinfo->value->row['byear'], (int)$xml->certinfo->userinfo->value->row['bmonth'], (int)$xml->certinfo->userinfo->value->row['bday']), # дата рождения
                 'byear'      => ((int)$xml->certinfo->userinfo->value->row['byear']), # дата рождения (год)
                 'phone'      => ((string)$xml->certinfo->userinfo->value->row['phone']),
                 'email'      => ((string)$xml->certinfo->userinfo->value->row['email']),
@@ -880,7 +880,7 @@ class wmxml
             'id'       => (int)$xml->operation['id'],
             'ts'       => (int)$xml->operation['ts'],
             'opertype' => (int)$xml->operation->opertype,
-            'dateupd'  => (string)$xml->operation->dateupd,
+            'dateupd'  => new DateTime((string)$xml->operation->dateupd),
             'success'  => (!$opertype) ? true : false,
         ];
     }
@@ -925,8 +925,8 @@ class wmxml
             'pursedest'  => (string)$xml->operation->pursedest,
             'amount'     => (float)$xml->operation->amount,
             'desc'       => (string)$xml->operation->desc,
-            'datecrt'    => (string)$xml->operation->datecrt,
-            'dateupd'    => (string)$xml->operation->dateupd,
+            'datecrt'    => new DateTime((string)$xml->operation->datecrt),
+            'dateupd'    => new DateTime((string)$xml->operation->dateupd),
         ];
     }
 
@@ -1001,8 +1001,8 @@ class wmxml
      * @param bool|int $is_trans разрешить(1) или нет(0) идентификатору в теге masterwmid переводы средств по доверию с доверяемого кошелька purse
      * @param bool|int $is_purse разрешить(1) или нет(0) идентификатору в теге masterwmid просмотр баланса на доверяемом кошельке purse
      * @param bool|int $is_transhist разрешить(1) или нет(0) идентификатору в теге masterwmid просмотр истории операций кошелька purse
-     * @param  string $masterwmid WMID, которому мы данным запросом разрешает или запрещает управление своим кошельком slavepurse
-     * @param  string $purse наш кошелёк, на который устанавливается доверие
+     * @param string $masterwmid WMID, которому мы данным запросом разрешает или запрещает управление своим кошельком slavepurse
+     * @param string $purse наш кошелёк, на который устанавливается доверие
      * @param float|int $limit суточный лимит
      * @param float|int $daylimit дневной лимит
      * @param float|int $weeklimit недельный лимит
