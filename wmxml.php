@@ -703,7 +703,7 @@ class wmxml
                 'wmid'        => (string)$wmid['wmid'],
                 'info'        => (string)$wmid['info'], # Дополнительная информация о WMID.
                 'nickname'    => (string)$wmid['nickname'], # Псевдоним (название проекта)
-                'datereg'     => (string)$wmid['datereg'], # Дата и время (московское) регистрации WMID в системе
+                'datereg'     => new DateTime((string)$wmid['datereg']), # Дата и время (московское) регистрации WMID в системе
                 'ctype'       => (int)$wmid['ctype'], # Юридический статус WMID (1 - используется в интересах физического лица, 2 - юридического)
                 'companyname' => (string)$wmid['companyname'], # Название компании (Заполняется только для юридических лиц)
                 'companyid'   => (string)$wmid['companyid'], # Регистрационный номер компании. ИНН (для российских компаний) КОД ЕГРПОУ (для украинских), Certificate number и т.п.
@@ -756,7 +756,7 @@ class wmxml
                 'fname'      => (string)$xml->certinfo->userinfo->value->row['fname'], # фамилия
                 'iname'      => (string)$xml->certinfo->userinfo->value->row['iname'], # имя
                 'oname'      => (string)$xml->certinfo->userinfo->value->row['oname'], # отчество
-                'bdate_'     => (new DateTime())->setDate((int)$xml->certinfo->userinfo->value->row['byear'], (int)$xml->certinfo->userinfo->value->row['bmonth'], (int)$xml->certinfo->userinfo->value->row['bday']), # дата рождения
+                'bdate'      => (new DateTime())->setDate((int)$xml->certinfo->userinfo->value->row['byear'], (int)$xml->certinfo->userinfo->value->row['bmonth'], (int)$xml->certinfo->userinfo->value->row['bday']), # дата рождения
                 'byear'      => ((int)$xml->certinfo->userinfo->value->row['byear']), # дата рождения (год)
                 'phone'      => ((string)$xml->certinfo->userinfo->value->row['phone']),
                 'email'      => ((string)$xml->certinfo->userinfo->value->row['email']),
@@ -778,7 +778,7 @@ class wmxml
                 'citid'      => (int)$xml->certinfo->userinfo->value->row['citid'],
                 # паспортные данные
                 'pnomer'     => (string)$xml->certinfo->userinfo->value->row['pnomer'], # серия и номер паспорта
-                'pdate_'     => (string)$xml->certinfo->userinfo->value->row['pdateMMDDYYYY'], # дата выдачи паспорта
+                'pdate'      => new DateTime((string)$xml->certinfo->userinfo->value->row['pdate']), # дата выдачи паспорта
                 'pcountry'   => (string)$xml->certinfo->userinfo->value->row['pcountry'], # государство, выдавшее паспорт
                 'pcountryid' => (int)$xml->certinfo->userinfo->value->row['pcountryid'], # код государства, выдавшее паспорт
                 'pcity'      => (string)$xml->certinfo->userinfo->value->row['pcity'],
@@ -806,7 +806,7 @@ class wmxml
                 'oname'       => (string)$xml->certinfo->userinfo->checklock->row['oname'],
                 'pnomer'      => (string)$xml->certinfo->userinfo->checklock->row['pnomer'],
                 'pdate'       => (string)$xml->certinfo->userinfo->checklock->row['pdate'],
-                'pbywhom'     => (string)$xml->certinfo->userinfo->checklock->row[''],
+                'pbywhom'     => (string)$xml->certinfo->userinfo->checklock->row['pbywhom'],
                 'pdateend'    => (string)$xml->certinfo->userinfo->checklock->row['pdateend'],
                 'pcode'       => (string)$xml->certinfo->userinfo->checklock->row['pcode'],
                 'pcountry'    => (string)$xml->certinfo->userinfo->checklock->row['pcountry'],
