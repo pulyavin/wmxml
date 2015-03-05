@@ -1,6 +1,7 @@
 <?php
 
 namespace pulyavin\wmxml;
+use Exception;
 
 class wmxml
 {
