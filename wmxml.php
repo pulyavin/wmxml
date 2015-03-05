@@ -1,5 +1,7 @@
 <?php
 
+namespace pulyavin\wmxml;
+
 class wmxml
 {
     # внутренние константы
@@ -424,11 +426,11 @@ class wmxml
         $opertype = (int)$xml->operation->opertype;
 
         return [
-            'id'           => (int)$xml->operation['id'],
-            'ts'           => (int)$xml->operation['ts'],
-            'opertype'     => $opertype,
-            'dateupd'      => new DateTime((string)$xml->operation->dateupd),
-            'success'      => (!$opertype) ? true : false,
+            'id'       => (int)$xml->operation['id'],
+            'ts'       => (int)$xml->operation['ts'],
+            'opertype' => $opertype,
+            'dateupd'  => new DateTime((string)$xml->operation->dateupd),
+            'success'  => (!$opertype) ? true : false,
         ];
     }
 
@@ -610,7 +612,7 @@ class wmxml
 
     /**
      * XML: X10, получение списка счетов на оплату
-     * @param string  $wmid       WM-идентификатор, которому был выписан счет (счета) на оплату
+     * @param string $wmid WM-идентификатор, которому был выписан счет (счета) на оплату
      * @param integer $wminvid номер счета (в системе WebMoney)
      * @param DateTime $datestart
      * @param DateTime $datefinish

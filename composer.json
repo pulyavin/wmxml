@@ -1,0 +1,22 @@
+{
+	"name": "pulyavin/wmxml",
+	"description": "WebMoney XML API on PHP",
+	"keywords": ["webmoney", "xml", "api", "WMXI"],
+	"homepage": "https://github.com/pulyavin/WebMoney-XML-API-PHP",
+	"authors": [
+		{
+			"name": "Artemiy Pulyavin",
+			"email": "artemiy@pulyavin.ru"
+		}
+	],
+	"require": {
+		"php": ">=5.3",
+		"ext-curl": "*",
+        "ext-mbstring": "*",
+	},
+	"autoload": {
+		"psr-4": {
+			"pulyavin\\WMXML\\": ""
+		}
+	}
+}
