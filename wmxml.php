@@ -1,36 +1,37 @@
 <?php
 
-namespace pulyavin\wmxml;
-use Exception;
+namespace pulyavin;
+use \Exception;
+use \DateTime;
 
 class wmxml
 {
-    # внутренние константы
+    // внутренние константы
     private $wmid;
     private $wmsigner;
     private $pem;
     private $transid;
-    # представление даты в WebMoney
+    // представление даты в WebMoney
     private $datePattern = "Ymd H:i:s";
-    # тип WebMoney Keeper: WinPro (Classic) или WebPro (Light)
+    // тип WebMoney Keeper: WinPro (Classic) или WebPro (Light)
     private $keeper;
-    # хэндлер curl
+    // хэндлер curl
     private $curl;
-    # хранитель возникших ошибок API
+    // хранитель возникших ошибок API
     public $error;
-    # типы транзакций:
+    // типы транзакций:
     const TRANSAC_IN = "in"; # входящая транзакция
     const TRANSAC_OUT = "out"; # исходящая транзакция
-    # типы переводов
+    // типы переводов
     const OPERTYPE_CLOSE = 0; # обычный (или с протекцией, завершенный успешно)
     const OPERTYPE_PROTECTION = 4; # с протекцией (не завершена)
     const OPERTYPE_BACK = 12; # с протекцией (вернулась)
-    # состояния счетов
+    // состояния счетов
     const STATE_NOPAY = 0; # не оплачен
     const STATE_PROTECT = 1; # оплачен по протекции
     const STATE_PAID = 2; # оплачен окончательно
     const STATE_DENIED = 3; # отказан
-    # типы контракторв в арбитраже
+    // типы контракторв в арбитраже
     const CONTRACT_PUBLIC = 1;
     const CONTRACT_PRIVATE = 2;
 
@@ -56,18 +57,18 @@ class wmxml
         $rootca = isset($data['rootca']) ? $data['rootca'] : null;
         $transid = isset($data['transid']) ? $data['transid'] : null;
         $pem = isset($data['pem']) ? $data['pem'] : null;
-        # настройки CURL-бибилотеки
+        // настройки CURL-бибилотеки
         $connect = isset($data['connect']) ? $data['connect'] : 5;
         $timeout = isset($data['timeout']) ? $data['timeout'] : 5;
 
-        # не указано то самое главное...
+        // не указано то самое главное...
         if (empty($wmid)) {
             throw new Exception("Unknown WMID");
         }
 
-        # устанавливаем тип WebMoney Keeper
+        // устанавливаем тип WebMoney Keeper
         if ($keeper == "classic") {
-            # проверяем корректность путей к файлам
+            // проверяем корректность путей к файлам
             if (empty($wmsigner)) {
                 throw new Exception("Unknown wmsigner-file path");
             }
@@ -97,11 +98,11 @@ class wmxml
             throw new Exception("Incorrect type of WebMoney Keeper");
         }
 
-        # устанавливаем общие параметры
+        // устанавливаем общие параметры
         $this->wmid = $wmid;
         $this->keeper = $keeper;
 
-        # нам указали путь до transid.txt
+        // нам указали путь до transid.txt
         if (!empty($transid)) {
             if (!realpath($transid)) {
                 throw new Exception("Incorrect transid-file path");
@@ -114,15 +115,15 @@ class wmxml
             $this->transid = realpath($transid);
         }
 
-        # инициализиуер объект CURL и настраиваем его
+        // инициализиуер объект CURL и настраиваем его
         $this->curl = curl_init();
         curl_setopt_array($this->curl, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_POST           => true,
-            # SSL-сертификат
+            // SSL-сертификат
             CURLOPT_CAINFO         => realpath($rootca),
             CURLOPT_SSL_VERIFYPEER => true,
-            # соединяемся и ждём ожидания, не не больше 5 секунд
+            // соединяемся и ждём ожидания, не не больше 5 секунд
             CURLOPT_CONNECTTIMEOUT => $connect,
             CURLOPT_TIMEOUT        => $timeout,
         ]);
@@ -149,7 +150,7 @@ class wmxml
         $address = htmlspecialchars(trim($address), ENT_QUOTES);
         $amount = (float)$amount;
 
-        # ебануться, грёбанный полаллен!
+        // ебануться, грёбанный полаллен!
         $desc_temp = mb_convert_encoding($desc, "CP1251", "UTF-8");
         $address_temp = mb_convert_encoding($address, "CP1251", "UTF-8");
 
@@ -175,7 +176,7 @@ class wmxml
             </w3s.request>
         ';
 
-        # получаем подпарщенный XML-пакет 
+        // получаем подпарщенный XML-пакет
         $xml = $this->getObject("1", $xml);
 
         return [
@@ -215,7 +216,7 @@ class wmxml
         $protect_code = htmlspecialchars(trim($protect_code), ENT_QUOTES);
         $amount = floatval($amount);
 
-        # ебануться, грёбанный полаллен!
+        // ебануться, грёбанный полаллен!
         $desc_temp = mb_convert_encoding($desc, "CP1251", "UTF-8");
         $protect_temp = mb_convert_encoding($protect_code, "CP1251", "UTF-8");
 
@@ -277,7 +278,7 @@ class wmxml
         $reqn = $this->getReqn();
         $sign = $this->getSign($purse . $reqn);
 
-        # устанавливаем даты, если они не переданы
+        // устанавливаем даты, если они не переданы
         $datestart = ($datestart) ? $datestart : (new DateTime("-3 month"));
         $datefinish = ($datefinish) ? $datefinish : (new DateTime());
 
@@ -298,7 +299,7 @@ class wmxml
             </w3s.request>
         ';
 
-        # получаем подпарщенный XML-пакет 
+        // получаем подпарщенный XML-пакет
         $xml = $this->getObject("3", $xml);
 
         $operations = [];
