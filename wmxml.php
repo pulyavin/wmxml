@@ -12,7 +12,6 @@ class wmxml
     private $wmsigner;
     private $pem;
     private $tranid;
-    private $signer;
     // представление даты в WebMoney
     private $datePattern = "Ymd H:i:s";
     // тип WebMoney Keeper: WinPro (Classic) или WebPro (Light)
