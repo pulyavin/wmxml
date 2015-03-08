@@ -1,6 +1,7 @@
 <?php
 
 namespace pulyavin;
+
 use \Exception;
 use \DateTime;
 
@@ -10,7 +11,8 @@ class wmxml
     private $wmid;
     private $wmsigner;
     private $pem;
-    private $transid;
+    private $tranid;
+    private $signer;
     // представление даты в WebMoney
     private $datePattern = "Ymd H:i:s";
     // тип WebMoney Keeper: WinPro (Classic) или WebPro (Light)
@@ -20,17 +22,17 @@ class wmxml
     // хранитель возникших ошибок API
     public $error;
     // типы транзакций:
-    const TRANSAC_IN = "in"; # входящая транзакция
-    const TRANSAC_OUT = "out"; # исходящая транзакция
+    const TRANSAC_IN = "in"; // входящая транзакция
+    const TRANSAC_OUT = "out"; // исходящая транзакция
     // типы переводов
-    const OPERTYPE_CLOSE = 0; # обычный (или с протекцией, завершенный успешно)
-    const OPERTYPE_PROTECTION = 4; # с протекцией (не завершена)
-    const OPERTYPE_BACK = 12; # с протекцией (вернулась)
+    const OPERTYPE_CLOSE = 0; // обычный (или с протекцией, завершенный успешно)
+    const OPERTYPE_PROTECTION = 4; // с протекцией (не завершена)
+    const OPERTYPE_BACK = 12; // с протекцией (вернулась)
     // состояния счетов
-    const STATE_NOPAY = 0; # не оплачен
-    const STATE_PROTECT = 1; # оплачен по протекции
-    const STATE_PAID = 2; # оплачен окончательно
-    const STATE_DENIED = 3; # отказан
+    const STATE_NOPAY = 0; // не оплачен
+    const STATE_PROTECT = 1; // оплачен по протекции
+    const STATE_PAID = 2; // оплачен окончательно
+    const STATE_DENIED = 3; // отказан
     // типы контракторв в арбитраже
     const CONTRACT_PUBLIC = 1;
     const CONTRACT_PRIVATE = 2;
@@ -38,15 +40,25 @@ class wmxml
     /**
      * иницализация объекта
      * @param string $keeper тип WebMoney Keeper: WinPro (Classic) или WebPro (Light)
-     * @param array $data конфигурационный массив
+     * @param array $data конфигурационный массив, содержащий следующие параметры:
      * [
-     *   "wmid", # WMID, подписывающего запросы
-     *   "wmsigner", # путь до бинарного файла подписчика wmsigner, если для аутентификации используется WM Keeper WinPro (Classic)
-     *   "pem", # путь до файла сертификата, если для аутентификации используется WM Keeper WebPro (Light)
-     *   "rootca", # путь до корневого сертификата WebMoney Transfer
-     *   "transid" # путь до txt-файла, хранящего значение следущего номера транзакции
-     *   "connect", # время таймаута открытия соеднения в библиотеке CURL
-     *   "timeout" # время таймаута ожидания получения ответа в библиотеке CURL
+     *   "wmid", // WMID, подписывающего запросы
+     *   "tranid" // путь до txt-файла, хранящего значение следущего номера транзакции (tranid), если будет использоваться XML2
+     *
+     *   // если используется WM Keeper WinPro (Classic)
+     *   "rootca", // путь до корневого сертификата WebMoney Transfer
+     *   "wmsigner"
+     *      // способ №1 - использовать скомпилированный wmsigner
+     *      "wmsigner", // путь до бинарного файла подписчика wmsigner
+     *      // способ №2 - использовать wmsigner на PHP
+     *      "wmsigner", // инстанс класса Signer
+     *
+     *   // если используется WM Keeper WebPro (Light)
+     *   "pem", // путь до файла сертификата
+     *
+     *   // необязательные атрибуты
+     *   "connect", // время таймаута открытия соеднения в библиотеке CURL
+     *   "timeout" // время таймаута ожидания получения ответа в библиотеке CURL
      * ]
      * @throws Exception
      */
@@ -55,7 +67,7 @@ class wmxml
         $wmid = isset($data['wmid']) ? $data['wmid'] : null;
         $wmsigner = isset($data['wmsigner']) ? $data['wmsigner'] : null;
         $rootca = isset($data['rootca']) ? $data['rootca'] : null;
-        $transid = isset($data['transid']) ? $data['transid'] : null;
+        $tranid = isset($data['tranid']) ? $data['tranid'] : null;
         $pem = isset($data['pem']) ? $data['pem'] : null;
         // настройки CURL-бибилотеки
         $connect = isset($data['connect']) ? $data['connect'] : 5;
@@ -68,13 +80,19 @@ class wmxml
 
         // устанавливаем тип WebMoney Keeper
         if ($keeper == "classic") {
-            // проверяем корректность путей к файлам
-            if (empty($wmsigner)) {
-                throw new Exception("Unknown wmsigner-file path");
+            // мы работаем с бинарным подписчиком
+            if (!self::isPhpSigner($wmsigner)) {
+                // проверяем корректность путей к файлам
+                if (empty($wmsigner)) {
+                    throw new Exception("Unknown wmsigner-file path");
+                }
+                if (!realpath($wmsigner)) {
+                    throw new Exception("Incorrect wmsigner-file path");
+                }
+
+                $wmsigner = realpath($wmsigner);
             }
-            if (!realpath($wmsigner)) {
-                throw new Exception("Incorrect wmsigner-file path");
-            }
+
             if (empty($rootca)) {
                 throw new Exception("Unknown rootca-file path");
             }
@@ -82,13 +100,14 @@ class wmxml
                 throw new Exception("Incorrect rootca-file path");
             }
 
-            $this->wmsigner = realpath($wmsigner);
-        } else if ($keeper == "light") {
+            $this->wmsigner = $wmsigner;
+        }
+        else if ($keeper == "light") {
             if (empty($pem)) {
                 throw new Exception("Unknown pem-file path");
             }
 
-            # проверяем корректность путей к файлам
+            // проверяем корректность путей к файлам
             if (!realpath($pem)) {
                 throw new Exception("Incorrect pem-file path");
             }
@@ -102,17 +121,17 @@ class wmxml
         $this->wmid = $wmid;
         $this->keeper = $keeper;
 
-        // нам указали путь до transid.txt
-        if (!empty($transid)) {
-            if (!realpath($transid)) {
-                throw new Exception("Incorrect transid-file path");
+        // нам указали путь до tranid.txt
+        if (!empty($tranid)) {
+            if (!realpath($tranid)) {
+                throw new Exception("Incorrect tranid-file path");
             }
 
-            if (!is_writable(realpath($transid))) {
-                throw new Exception("Transid file not writable");
+            if (!is_writable(realpath($tranid))) {
+                throw new Exception("tranid file not writable");
             }
 
-            $this->transid = realpath($transid);
+            $this->tranid = realpath($tranid);
         }
 
         // инициализиуер объект CURL и настраиваем его
@@ -123,7 +142,7 @@ class wmxml
             // SSL-сертификат
             CURLOPT_CAINFO         => realpath($rootca),
             CURLOPT_SSL_VERIFYPEER => true,
-            // соединяемся и ждём ожидания, не не больше 5 секунд
+            // соединяемся и ждём ожидания, но не больше указанного кол-ва секунд
             CURLOPT_CONNECTTIMEOUT => $connect,
             CURLOPT_TIMEOUT        => $timeout,
         ]);
@@ -210,7 +229,7 @@ class wmxml
      */
     public function xml2($at_purse, $to_purse, $amount, $desc, $protect_period = 0, $protect_code = "", $wminvid = 0, $onlyauth = 0)
     {
-        $transid = $this->getTransid();
+        $tranid = $this->getTranid();
         $reqn = $this->getReqn();
         $desc = htmlspecialchars(trim($desc), ENT_QUOTES);
         $protect_code = htmlspecialchars(trim($protect_code), ENT_QUOTES);
@@ -220,7 +239,7 @@ class wmxml
         $desc_temp = mb_convert_encoding($desc, "CP1251", "UTF-8");
         $protect_temp = mb_convert_encoding($protect_code, "CP1251", "UTF-8");
 
-        $sign = $this->getSign($reqn . $transid . $at_purse . $to_purse . $amount . $protect_period . $protect_temp . $desc_temp . $wminvid);
+        $sign = $this->getSign($reqn . $tranid . $at_purse . $to_purse . $amount . $protect_period . $protect_temp . $desc_temp . $wminvid);
 
         $xml = '
             <w3s.request>
@@ -228,7 +247,7 @@ class wmxml
                 <wmid>' . $this->wmid . '</wmid>
                 <sign>' . $sign . '</sign>
                 <trans>
-                    <tranid>' . $transid . '</tranid>
+                    <tranid>' . $tranid . '</tranid>
                     <pursesrc>' . $at_purse . '</pursesrc>
                     <pursedest>' . $to_purse . '</pursedest>
                     <amount>' . $amount . '</amount>
@@ -241,7 +260,7 @@ class wmxml
             </w3s.request>
         ';
 
-        # получаем подпарщенный XML-пакет 
+        // получаем подпарщенный XML-пакет 
         $xml = $this->getObject("2", $xml);
 
         return [
@@ -267,13 +286,13 @@ class wmxml
      * @param DateTime $datestart минимальное время и дата выполнения операции (ГГГГММДД ЧЧ:ММ:СС)
      * @param DateTime $datefinish максимальное время и дата выполнения операции (ГГГГММДД ЧЧ:ММ:СС)
      * @param integer $wmtranid номер операции (в системе WebMoney)
-     * @param integer $transid номер перевода в системе учета отправителя
+     * @param integer $tranid номер перевода в системе учета отправителя
      * @param integer $wminvid номер счета (в системе WebMoney) по которому выполнялась операция
      * @param integer $orderid номер счета в системе учета магазина
      * @return array
      * @throws Exception
      */
-    public function xml3($purse, DateTime $datestart = null, DateTime $datefinish = null, $wmtranid = 0, $transid = 0, $wminvid = 0, $orderid = 0)
+    public function xml3($purse, DateTime $datestart = null, DateTime $datefinish = null, $wmtranid = 0, $tranid = 0, $wminvid = 0, $orderid = 0)
     {
         $reqn = $this->getReqn();
         $sign = $this->getSign($purse . $reqn);
@@ -290,7 +309,7 @@ class wmxml
                 <getoperations>
                     <purse>' . $purse . '</purse>
                     <wmtranid>' . $wmtranid . '</wmtranid>
-                    <tranid>' . $transid . '</tranid>
+                    <tranid>' . $tranid . '</tranid>
                     <wminvid>' . $wminvid . '</wminvid>
                     <orderid>' . $orderid . '</orderid>
                     <datestart>' . $datestart->format($this->datePattern) . '</datestart>
@@ -353,7 +372,7 @@ class wmxml
         $reqn = $this->getReqn();
         $sign = $this->getSign($purse . $reqn);
 
-        # устанавливаем даты, если они не переданы
+        // устанавливаем даты, если они не переданы
         $datestart = ($datestart) ? $datestart : (new DateTime("-3 month"));
         $datefinish = ($datefinish) ? $datefinish : (new DateTime());
 
@@ -372,7 +391,7 @@ class wmxml
             </w3s.request>
         ';
 
-        # получаем подпарщенный XML-пакет 
+        // получаем подпарщенный XML-пакет 
         $xml = $this->getObject("4", $xml);
 
         $invoices = [];
@@ -422,7 +441,7 @@ class wmxml
             </w3s.request>
         ';
 
-        # получаем подпарщенный XML-пакет 
+        // получаем подпарщенный XML-пакет 
         $xml = $this->getObject("5", $xml);
 
         $opertype = (int)$xml->operation->opertype;
@@ -449,7 +468,7 @@ class wmxml
         $message = htmlspecialchars(trim($message), ENT_QUOTES);
         $subject = htmlspecialchars(trim($subject), ENT_QUOTES);
 
-        # ебануться, грёбанный полаллен!
+        // ебануться, грёбанный полаллен!
         $message_temp = mb_convert_encoding($message, "CP1251", "UTF-8");
         $subject_temp = mb_convert_encoding($subject, "CP1251", "UTF-8");
 
@@ -468,7 +487,7 @@ class wmxml
             </w3s.request>
         ';
 
-        # получаем подпарщенный XML-пакет 
+        // получаем подпарщенный XML-пакет 
         $xml = $this->getObject("6", $xml);
 
         return [
@@ -503,10 +522,10 @@ class wmxml
             </w3s.request>
         ';
 
-        # получаем подпарщенный XML-пакет 
+        // получаем подпарщенный XML-пакет 
         $xml = $this->getObject("8", $xml);
 
-        # проверяем существование wmid
+        // проверяем существование wmid
         if (
             $wmid
             &&
@@ -520,7 +539,7 @@ class wmxml
                     'newattst'          => (int)$xml->testwmpurse->wmid['newattst'],
                 ],
             ];
-        } # проверяем существование кошелька
+        } // проверяем существование кошелька
         else if (
             $wmid == null
             &&
@@ -543,7 +562,7 @@ class wmxml
                 'merchant_active_mode'   => (int)$xml->testwmpurse->purse['merchant_active_mode'],
                 'merchant_allow_cashier' => (int)$xml->testwmpurse->purse['merchant_allow_cashier'],
             ];
-        } # проверяем принадлежность кошелька к wmid
+        } // проверяем принадлежность кошелька к wmid
         else {
             $belongs = (((string)$xml->testwmpurse->purse) == $purse) ? true : false;
             $return = [];
@@ -577,7 +596,7 @@ class wmxml
     {
         $reqn = $this->getReqn();
         $sign = $this->getSign($this->wmid . $reqn);
-        # если не передан WMID - используем системный
+        // если не передан WMID - используем системный
         $wmid = ($wmid) ? $wmid : $this->wmid;
 
         $xml = '
@@ -591,7 +610,7 @@ class wmxml
             </w3s.request>
         ';
 
-        # получаем подпарщенный XML-пакет 
+        // получаем подпарщенный XML-пакет 
         $xml = $this->getObject("9", $xml);
 
         $purses = [];
@@ -625,7 +644,7 @@ class wmxml
     {
         $wmid = ($wmid) ? $wmid : $this->wmid;
 
-        # устанавливаем даты, если они не переданы
+        // устанавливаем даты, если они не переданы
         $datestart = ($datestart) ? $datestart : (new DateTime("-3 month"));
         $datefinish = ($datefinish) ? $datefinish : (new DateTime());
 
@@ -646,7 +665,7 @@ class wmxml
             </w3s.request>
         ';
 
-        # получаем подпарщенный XML-пакет 
+        // получаем подпарщенный XML-пакет 
         $xml = $this->getObject("10", $xml);
 
         $invoices = [];
@@ -697,26 +716,26 @@ class wmxml
             </w3s.request>
         ';
 
-        # получаем подпарщенный XML-пакет 
+        // получаем подпарщенный XML-пакет 
         $xml = $this->getObject("11", $xml);
 
-        # собираем список WMID, прикрепленных к данному аттестату
+        // собираем список WMID, прикрепленных к данному аттестату
         $wmids = [];
         foreach ($xml->certinfo->wmids->row as $wmid) {
             $wmids[(int)$wmid['wmid']] = [
                 'wmid'        => (string)$wmid['wmid'],
-                'info'        => (string)$wmid['info'], # Дополнительная информация о WMID.
-                'nickname'    => (string)$wmid['nickname'], # Псевдоним (название проекта)
-                'datereg'     => new DateTime((string)$wmid['datereg']), # Дата и время (московское) регистрации WMID в системе
-                'ctype'       => (int)$wmid['ctype'], # Юридический статус WMID (1 - используется в интересах физического лица, 2 - юридического)
-                'companyname' => (string)$wmid['companyname'], # Название компании (Заполняется только для юридических лиц)
-                'companyid'   => (string)$wmid['companyid'], # Регистрационный номер компании. ИНН (для российских компаний) КОД ЕГРПОУ (для украинских), Certificate number и т.п.
+                'info'        => (string)$wmid['info'], // Дополнительная информация о WMID.
+                'nickname'    => (string)$wmid['nickname'], // Псевдоним (название проекта)
+                'datereg'     => new DateTime((string)$wmid['datereg']), // Дата и время (московское) регистрации WMID в системе
+                'ctype'       => (int)$wmid['ctype'], // Юридический статус WMID (1 - используется в интересах физического лица, 2 - юридического)
+                'companyname' => (string)$wmid['companyname'], // Название компании (Заполняется только для юридических лиц)
+                'companyid'   => (string)$wmid['companyid'], // Регистрационный номер компании. ИНН (для российских компаний) КОД ЕГРПОУ (для украинских), Certificate number и т.п.
                 'phone'       => (string)$wmid['phone'],
                 'email'       => (string)$wmid['email'],
             ];
         }
 
-        # собираем список веб-сайтов аттестата
+        // собираем список веб-сайтов аттестата
         $weblists = [];
         foreach ($xml->certinfo->userinfo->weblist->row as $weblist) {
             $weblists[] = [
@@ -727,7 +746,7 @@ class wmxml
             ];
         }
 
-        # собираем дополнительные данные
+        // собираем дополнительные данные
         $extendeddata = [];
         foreach ($xml->certinfo->userinfo->extendeddata->row as $data) {
             $extendeddata[] = [
@@ -738,62 +757,62 @@ class wmxml
         }
 
         return [
-            'fullaccess'   => (int)$xml->fullaccess, # индикатор наличия доступа к закрытым полям аттестата
-            # информация об аттестате
+            'fullaccess'   => (int)$xml->fullaccess, // индикатор наличия доступа к закрытым полям аттестата
+            // информация об аттестате
             'attestat'     => [
-                'tid'          => (int)$xml->certinfo->attestat->row['tid'], # Тип аттестата
-                'recalled'     => (int)$xml->certinfo->attestat->row['recalled'], # Информация об отказе в обслуживании
-                'datecrt'      => new DateTime((string)$xml->certinfo->attestat->row['datecrt']), # Дата и время (московское) выдачи аттестата
-                'dateupd'      => new DateTime((string)$xml->certinfo->attestat->row['dateupd']), # Дата и время (московское) последнего изменения данных
-                'regnickname'  => (string)$xml->certinfo->attestat->row['regnickname'], # Название проекта, имя (nick) аттестатора, выдавшего данный аттестат
-                'regwmid'      => (string)$xml->certinfo->attestat->row['regwmid'], # WMID аттестатора, выдавшего данный аттестат
-                'status'       => (int)$xml->certinfo->attestat->row['status'], # признак прохождения вторичной проверки (10 - не пройдена, 11 - пройдена)
-                'is_secondary' => (((int)$xml->certinfo->attestat->row['status']) == "11") ? true : false, # признак прохождения вторичной проверки
-                'notary'       => (int)$xml->certinfo->attestat->row['notary'], # особенность получения аттестата (0 - личная встреча, 1 - нотариально заверенные документы, 2 - автоматически, по результатам успешного пополнения кошелька)
+                'tid'          => (int)$xml->certinfo->attestat->row['tid'], // Тип аттестата
+                'recalled'     => (int)$xml->certinfo->attestat->row['recalled'], // Информация об отказе в обслуживании
+                'datecrt'      => new DateTime((string)$xml->certinfo->attestat->row['datecrt']), // Дата и время (московское) выдачи аттестата
+                'dateupd'      => new DateTime((string)$xml->certinfo->attestat->row['dateupd']), // Дата и время (московское) последнего изменения данных
+                'regnickname'  => (string)$xml->certinfo->attestat->row['regnickname'], // Название проекта, имя (nick) аттестатора, выдавшего данный аттестат
+                'regwmid'      => (string)$xml->certinfo->attestat->row['regwmid'], // WMID аттестатора, выдавшего данный аттестат
+                'status'       => (int)$xml->certinfo->attestat->row['status'], // признак прохождения вторичной проверки (10 - не пройдена, 11 - пройдена)
+                'is_secondary' => (((int)$xml->certinfo->attestat->row['status']) == "11") ? true : false, // признак прохождения вторичной проверки
+                'notary'       => (int)$xml->certinfo->attestat->row['notary'], // особенность получения аттестата (0 - личная встреча, 1 - нотариально заверенные документы, 2 - автоматически, по результатам успешного пополнения кошелька)
             ],
-            # список WMID, прикрепленных к данному аттестату
+            // список WMID, прикрепленных к данному аттестату
             'wmids'        => $wmids,
-            # персональные данные владельца аттестата
+            // персональные данные владельца аттестата
             'userinfo'     => [
-                # персональная информация
-                'nickname'   => (string)$xml->certinfo->userinfo->value->row['nickname'], # название проекта, имя (nickname)
-                'fname'      => (string)$xml->certinfo->userinfo->value->row['fname'], # фамилия
-                'iname'      => (string)$xml->certinfo->userinfo->value->row['iname'], # имя
-                'oname'      => (string)$xml->certinfo->userinfo->value->row['oname'], # отчество
-                'bdate'      => (new DateTime())->setDate((int)$xml->certinfo->userinfo->value->row['byear'], (int)$xml->certinfo->userinfo->value->row['bmonth'], (int)$xml->certinfo->userinfo->value->row['bday']), # дата рождения
-                'byear'      => ((int)$xml->certinfo->userinfo->value->row['byear']), # дата рождения (год)
+                // персональная информация
+                'nickname'   => (string)$xml->certinfo->userinfo->value->row['nickname'], // название проекта, имя (nickname)
+                'fname'      => (string)$xml->certinfo->userinfo->value->row['fname'], // фамилия
+                'iname'      => (string)$xml->certinfo->userinfo->value->row['iname'], // имя
+                'oname'      => (string)$xml->certinfo->userinfo->value->row['oname'], // отчество
+                'bdate'      => (new DateTime())->setDate((int)$xml->certinfo->userinfo->value->row['byear'], (int)$xml->certinfo->userinfo->value->row['bmonth'], (int)$xml->certinfo->userinfo->value->row['bday']), // дата рождения
+                'byear'      => ((int)$xml->certinfo->userinfo->value->row['byear']), // дата рождения (год)
                 'phone'      => ((string)$xml->certinfo->userinfo->value->row['phone']),
                 'email'      => ((string)$xml->certinfo->userinfo->value->row['email']),
                 'web'        => ((string)$xml->certinfo->userinfo->value->row['web']),
-                'sex'        => ((int)$xml->certinfo->userinfo->value->row['sex']), # пол
+                'sex'        => ((int)$xml->certinfo->userinfo->value->row['sex']), // пол
                 'icq'        => ((int)$xml->certinfo->userinfo->value->row['icq']),
-                'rcountry'   => ((string)$xml->certinfo->userinfo->value->row['rcountry']), # место (страна) постоянной регистрации
-                'rcity'      => ((string)$xml->certinfo->userinfo->value->row['rcity']), # место (город) постоянной регистрации
+                'rcountry'   => ((string)$xml->certinfo->userinfo->value->row['rcountry']), // место (страна) постоянной регистрации
+                'rcity'      => ((string)$xml->certinfo->userinfo->value->row['rcity']), // место (город) постоянной регистрации
                 'rcountryid' => ((int)$xml->certinfo->userinfo->value->row['rcountryid']),
                 'rcitid'     => ((int)$xml->certinfo->userinfo->value->row['rcitid']),
-                'radres'     => ((string)$xml->certinfo->userinfo->value->row['radres']), # место (полный адрес) постоянной регистрации
-                # почтовый адрес
-                'country'    => (string)$xml->certinfo->userinfo->value->row['country'], # почтовый адрес - страна
-                'city'       => (string)$xml->certinfo->userinfo->value->row['city'], # почтовый адрес - город
-                'region'     => (string)$xml->certinfo->userinfo->value->row['region'], # регион, область
-                'zipcode'    => (int)$xml->certinfo->userinfo->value->row['zipcode'], # почтовый адрес -индекс
-                'adres'      => (string)$xml->certinfo->userinfo->value->row['adres'], # почтовый адрес - улица, дом, квартира
+                'radres'     => ((string)$xml->certinfo->userinfo->value->row['radres']), // место (полный адрес) постоянной регистрации
+                // почтовый адрес
+                'country'    => (string)$xml->certinfo->userinfo->value->row['country'], // почтовый адрес - страна
+                'city'       => (string)$xml->certinfo->userinfo->value->row['city'], // почтовый адрес - город
+                'region'     => (string)$xml->certinfo->userinfo->value->row['region'], // регион, область
+                'zipcode'    => (int)$xml->certinfo->userinfo->value->row['zipcode'], // почтовый адрес -индекс
+                'adres'      => (string)$xml->certinfo->userinfo->value->row['adres'], // почтовый адрес - улица, дом, квартира
                 'countryid'  => (int)$xml->certinfo->userinfo->value->row['countryid'],
                 'citid'      => (int)$xml->certinfo->userinfo->value->row['citid'],
-                # паспортные данные
-                'pnomer'     => (string)$xml->certinfo->userinfo->value->row['pnomer'], # серия и номер паспорта
-                'pdate'      => new DateTime((string)$xml->certinfo->userinfo->value->row['pdate']), # дата выдачи паспорта
-                'pcountry'   => (string)$xml->certinfo->userinfo->value->row['pcountry'], # государство, выдавшее паспорт
-                'pcountryid' => (int)$xml->certinfo->userinfo->value->row['pcountryid'], # код государства, выдавшее паспорт
+                // паспортные данные
+                'pnomer'     => (string)$xml->certinfo->userinfo->value->row['pnomer'], // серия и номер паспорта
+                'pdate'      => new DateTime((string)$xml->certinfo->userinfo->value->row['pdate']), // дата выдачи паспорта
+                'pcountry'   => (string)$xml->certinfo->userinfo->value->row['pcountry'], // государство, выдавшее паспорт
+                'pcountryid' => (int)$xml->certinfo->userinfo->value->row['pcountryid'], // код государства, выдавшее паспорт
                 'pcity'      => (string)$xml->certinfo->userinfo->value->row['pcity'],
                 'pcitid'     => (int)$xml->certinfo->userinfo->value->row['pcitid'],
-                'pbywhom'    => (string)$xml->certinfo->userinfo->value->row['pbywhom'], # код или наименование подразделения (органа), выдавшего паспорт
+                'pbywhom'    => (string)$xml->certinfo->userinfo->value->row['pbywhom'], // код или наименование подразделения (органа), выдавшего паспорт
             ],
-            # признак проверки персональных данных аттестатором и блокировки публичного отображения персональных данных.
-            # 00 - данное поле не проверено аттестатором и не заблокировано владельцем аттестата для публичного показа
-            # 01 - данное поле не проверено аттестатором и заблокировано владельцем аттестата для публичного показа
-            # 10 - данное поле проверено аттестатором и не заблокировано владельцем аттестата для публичного показа
-            # 11 - данное поле проверено аттестатором и заблокировано владельцем аттестата для публичного показа
+            // признак проверки персональных данных аттестатором и блокировки публичного отображения персональных данных.
+            // 00 - данное поле не проверено аттестатором и не заблокировано владельцем аттестата для публичного показа
+            // 01 - данное поле не проверено аттестатором и заблокировано владельцем аттестата для публичного показа
+            // 10 - данное поле проверено аттестатором и не заблокировано владельцем аттестата для публичного показа
+            // 11 - данное поле проверено аттестатором и заблокировано владельцем аттестата для публичного показа
             'check-lock'   => [
                 'ctype'       => (string)$xml->certinfo->userinfo->checklock->row['ctype'],
                 'jstatus'     => (string)$xml->certinfo->userinfo->checklock->row['jstatus'],
@@ -846,9 +865,9 @@ class wmxml
                 'jabberid'    => (string)$xml->certinfo->userinfo->checklock->row['jabberid'],
                 'sex'         => (string)$xml->certinfo->userinfo->checklock->row['sex'],
             ],
-            # список веб-сайтов аттестата
+            // список веб-сайтов аттестата
             'weblist'      => $weblists,
-            # дополнительные данные
+            // дополнительные данные
             'extendeddata' => $extendeddata,
         ];
     }
@@ -875,7 +894,7 @@ class wmxml
             </w3s.request>
         ';
 
-        # получаем подпарщенный XML-пакет 
+        // получаем подпарщенный XML-пакет 
         $xml = $this->getObject("13", $xml);
 
         $opertype = (int)$xml->operation->opertype;
@@ -916,7 +935,7 @@ class wmxml
             </w3s.request>
         ';
 
-        # получаем подпарщенный XML-пакет 
+        // получаем подпарщенный XML-пакет 
         $xml = $this->getObject("14", $xml);
 
         $opertype = (int)$xml->operation->opertype;
@@ -945,7 +964,7 @@ class wmxml
      */
     public function xml151($wmid = null)
     {
-        # в зависимости от того передан нам WMID или нет - используем разные интерфейсы
+        // в зависимости от того передан нам WMID или нет - используем разные интерфейсы
         $iwmid = ($wmid) ? $wmid : $this->wmid;
 
         $reqn = $this->getReqn();
@@ -962,9 +981,9 @@ class wmxml
             </w3s.request>
         ';
 
-        # получаем подпарщенный XML-пакет
-        # если нет WMID - используем XMLTrustList.asp
-        # если есть WMID - используем XMLTrustList2.asp
+        // получаем подпарщенный XML-пакет
+        // если нет WMID - используем XMLTrustList.asp
+        // если есть WMID - используем XMLTrustList2.asp
         if (!$wmid) {
             $xml = $this->getObject("1511", $xml);
         } else {
@@ -1036,7 +1055,7 @@ class wmxml
             </w3s.request>
         ';
 
-        # получаем подпарщенный XML-пакет
+        // получаем подпарщенный XML-пакет
         $xml = $this->getObject("152", $xml);
 
         return [
@@ -1065,7 +1084,7 @@ class wmxml
         $name = htmlspecialchars(trim($name), ENT_QUOTES);
         $text = htmlspecialchars(trim($text), ENT_QUOTES);
 
-        # ебануться, грёбанный полаллен!
+        // ебануться, грёбанный полаллен!
         $name_temp = mb_convert_encoding($name, "CP1251", "UTF-8");
 
         $sign = $this->getSign($this->wmid . mb_strlen($name_temp) . $ctype);
@@ -1087,7 +1106,7 @@ class wmxml
             </contract.request>
         ';
 
-        # получаем подпарщенный XML-пакет
+        // получаем подпарщенный XML-пакет
         $xml = $this->getObject("171", $xml);
 
         return [
@@ -1104,7 +1123,7 @@ class wmxml
      */
     public function xml172($contractid)
     {
-        # для получения информации об акцептантах всегда указывать mode=acceptdate
+        // для получения информации об акцептантах всегда указывать mode=acceptdate
         $mode = 'acceptdate';
 
         $sign = $this->getSign($contractid . $mode);
@@ -1118,7 +1137,7 @@ class wmxml
             </contract.request>
         ';
 
-        # получаем подпарщенный XML-пакет
+        // получаем подпарщенный XML-пакет
         $xml = $this->getObject("172", $xml);
 
         $contractinfo = [];
@@ -1154,10 +1173,10 @@ class wmxml
         $sign = null;
         $md5 = null;
 
-        # аутентифицируемся через WMSigner
+        // аутентифицируемся через WMSigner
         if (!$secret_key) {
             $sign = $this->getSign($wmid . $purse . $number);
-        } # иначе используем MD5-алгоритм
+        } // иначе используем MD5-алгоритм
         else {
             $md5 = md5($wmid . $purse . $number . $secret_key);
         }
@@ -1173,7 +1192,7 @@ class wmxml
             </merchant.request>
         ';
 
-        # получаем подпарщенный XML-пакет
+        // получаем подпарщенный XML-пакет
         $xml = $this->getObject("18", $xml);
 
         return [
@@ -1233,7 +1252,7 @@ class wmxml
             </passport.request>
         ';
 
-        # получаем подпарщенный XML-пакет
+        // получаем подпарщенный XML-пакет
         $xml = $this->getObject("19", $xml);
     }
 
@@ -1253,7 +1272,7 @@ class wmxml
             </WMIDLevel.request>
         ';
 
-        # получаем подпарщенный XML-пакет
+        // получаем подпарщенный XML-пакет
         $xml = $this->getObject("bl", $xml);
 
         return (int)$xml->level;
@@ -1277,7 +1296,7 @@ class wmxml
             </trustlimits>
         ';
 
-        # получаем подпарщенный XML-пакет
+        // получаем подпарщенный XML-пакет
         $xml = $this->getObject("tl", $xml);
 
         return (int)$xml->tl['val'];
@@ -1299,7 +1318,7 @@ class wmxml
             </request>
         ';
 
-        # получаем подпарщенный XML-пакет
+        // получаем подпарщенный XML-пакет
         $xml = $this->getObject("claims", $xml);
 
         return $xml;
@@ -1318,10 +1337,10 @@ class wmxml
         $xml = '
             <request>
         ';
-        # мы проверяем кошелёк
+        // мы проверяем кошелёк
         if ($is_purse) {
             $xml .= '<purse>' . $search . '</purse>';
-        } # мы проверяем wmid
+        } // мы проверяем wmid
         else {
             $xml .= '<wmid>' . $search . '</wmid>';
         }
@@ -1329,10 +1348,10 @@ class wmxml
             </request>
         ';
 
-        # получаем подпарщенный XML-пакет
+        // получаем подпарщенный XML-пакет
         $xml = $this->getObject("wminfo", $xml);
 
-        # собираем список wmid's
+        // собираем список wmid's
         $wmids = [];
         foreach ($xml->certinfo->wmids->row as $data) {
             $wmids[] = [
@@ -1342,7 +1361,7 @@ class wmxml
             ];
         }
 
-        # собираем список userinfo's
+        // собираем список userinfo's
         $userinfo = [];
         foreach ($xml->certinfo->userinfo->value->row as $data) {
             $userinfo[] = [
@@ -1353,7 +1372,7 @@ class wmxml
             ];
         }
 
-        # собираем список claims's
+        // собираем список claims's
         $claims = [];
         foreach ($xml->certinfo->claims->row as $data) {
             $claims[] = [
@@ -1363,7 +1382,7 @@ class wmxml
             ];
         }
 
-        # собираем список urls's
+        // собираем список urls's
         $urls = [];
         foreach ($xml->certinfo->urls->row as $data) {
             $urls[] = [
@@ -1398,7 +1417,7 @@ class wmxml
             CURLOPT_POSTFIELDS => $xml,
         ]);
 
-        # обрабатываем ошибку cURL
+        // обрабатываем ошибку cURL
         if (($result = curl_exec($this->curl)) === false) {
             throw new Exception(curl_error($this->curl) . print_r(curl_getinfo($this->curl), true), curl_errno($this->curl));
         }
@@ -1421,14 +1440,14 @@ class wmxml
     {
         $result = $this->sendXml($interface, $xml);
 
-        # хак для XML11, не умею я обращаться к свойствам объекта, в которых есть дефис ;)
+        // хак для XML11, не умею я обращаться к свойствам объекта, в которых есть дефис ;)
         if ($interface == "11") {
             $result = str_replace("check-lock", "checklock", $result);
         }
 
         $xml = simplexml_load_string($result);
 
-        # обрабатываем ошибку
+        // обрабатываем ошибку
         if (
             $interface == "11"
             ||
@@ -1439,7 +1458,7 @@ class wmxml
             $retval = (int)$xml->retval;
         }
 
-        # хак для XML8, всё нормально
+        // хак для XML8, всё нормально
         if (
             $interface == "8"
             &&
@@ -1449,9 +1468,9 @@ class wmxml
         }
 
         if ($retval) {
-            # пытаемся найти текст ошибки
+            // пытаемся найти текст ошибки
             $error = $this->getError($interface, $retval);
-            # текст не нашли, а может в пакете чё есть...
+            // текст не нашли, а может в пакете чё есть...
             if ($error === false && isset($xml->retdesc)) {
                 $error = $xml->retdesc;
             }
@@ -1474,59 +1493,84 @@ class wmxml
     }
 
     /**
-     * возвращает и инкрементирует транзакционный идентификатор платежа из файла transid.txt
+     * возвращает и инкрементирует транзакционный идентификатор платежа из файла tranid.txt
      * @return int
      * @throws Exception
      */
-    private function getTransid()
+    private function getTranid()
     {
-        # а вдруг нам не указали путь до файла transid.txt
-        if (empty($this->transid)) {
-            throw new Exception("Have not path transid-file!");
+        // а вдруг нам не указали путь до файла tranid.txt
+        if (empty($this->tranid)) {
+            throw new Exception("Have not path tranid-file!");
         }
 
-        $fopen = fopen($this->transid, "r+");
+        $fopen = fopen($this->tranid, "r+");
 
-        $start = time(); # время старта попытки блокировки
-        # пытаемся получить блокировку в течении 3-х секунд
+        $start = time(); // время старта попытки блокировки
+        // пытаемся получить блокировку в течении 3-х секунд
         while ((time(true) - $start) < 3) {
             $locked = flock($fopen, LOCK_EX);
-            # не удалось заблокировать файл
+            // не удалось заблокировать файл
             if (!$locked) {
-                # ну чтож, ждём 100мс
+                // ну чтож, ждём 100мс
                 usleep(100000);
             }
         }
 
-        # не уалось получить блокировку
+        // не уалось получить блокировку
         if (!$locked) {
-            throw new Exception("Can't get lock transid file");
+            throw new Exception("Can't get lock tranid file");
         }
 
-        $transid = (int)fgets($fopen);
-        $transid++;
+        $tranid = (int)fgets($fopen);
+        $tranid++;
         rewind($fopen);
-        fwrite($fopen, $transid);
+        fwrite($fopen, $tranid);
         fflush($fopen);
         flock($fopen, LOCK_UN);
         fclose($fopen);
 
-        return $transid;
+        return $tranid;
     }
 
     /**
-     * пишет в бинарный wmsigner и получает подписанную строку
-     * @param  string $string строка для подписи
+     * Обёртка над C и PHP подписчиками
+     * @param $string
      * @return string
      */
     private function getSign($string)
     {
-        # если это WebMoney Keeper WebPro, то подписывать ему ничего не надо
+        if (self::isPhpSigner($this->wmsigner)) {
+            return $this->phpSigner($string);
+        }
+        else {
+            return $this->cSigner($string);
+        }
+    }
+
+    /**
+     * PHP подписчик
+     * @param $string
+     * @return string
+     */
+    private function phpSigner($string)
+    {
+        return $this->wmsigner->sign($string);
+    }
+
+    /**
+     * C подписчик: пишет в бинарный wmsigner и получает подписанную строку
+     * @param  string $string строка для подписи
+     * @return string
+     */
+    private function cSigner($string)
+    {
+        // если это WebMoney Keeper WebPro, то подписывать ему ничего не надо
         if ($this->keeper == "light") {
             return;
         }
 
-        # мы должны быть в папке, т.к. там файл ключей и ini-файл
+        // мы должны быть в папке, т.к. там файл ключей и ini-файл
         chdir(dirname($this->wmsigner));
 
         $descriptorspec = [
@@ -1547,6 +1591,15 @@ class wmxml
     }
 
     /**
+     * @param $object
+     * @return bool
+     */
+    private static function isPhpSigner($object)
+    {
+        return $object instanceof \baibaratsky\WebMoney\Signer;
+    }
+
+    /**
      * по идентификатору возвращает URL-адрес интерфейса
      * @param  string $interface название интерфейса
      * @return string
@@ -1555,7 +1608,7 @@ class wmxml
     private function getUrl($interface)
     {
         $url = [
-            # список URL для WM Keeper WinPro (Classic), использующий аутентификацию через ключи и wmsigner
+            // список URL для WM Keeper WinPro (Classic), использующий аутентификацию через ключи и wmsigner
             "classic" => [
                 "1"      => "https://w3s.webmoney.ru/asp/XMLInvoice.asp",
                 "2"      => "https://w3s.webmoney.ru/asp/XMLTrans.asp",
@@ -1590,7 +1643,7 @@ class wmxml
                 "wminfo" => "https://passport.webmoney.ru/xml/XMLGetWMIDInfo.aspx",
             ],
 
-            # список URL для WM Keeper WebPro (Light), использующий аутентификацию через сертификат
+            // список URL для WM Keeper WebPro (Light), использующий аутентификацию через сертификат
             "light"   => [
                 "1"      => "https://w3s.wmtransfer.com/asp/XMLInvoiceCert.asp",
                 "2"      => "https://w3s.wmtransfer.com/asp/XMLTransCert.asp",
