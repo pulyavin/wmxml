@@ -1,5 +1,6 @@
 {
 	"name": "pulyavin/WebMoney",
+	"type": "library",
 	"description": "WebMoney XML API on PHP",
 	"keywords": ["webmoney", "xml", "api", "WMXI"],
 	"homepage": "https://github.com/pulyavin/WebMoney-XML-API-PHP",
@@ -12,7 +13,7 @@
 	"require": {
 		"php": ">=5.3",
 		"ext-curl": "*",
-        "ext-mbstring": "*",
+        "ext-mbstring": "*"
 	},
 	"autoload": {
 		"psr-4": {
