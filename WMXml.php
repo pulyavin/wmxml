@@ -31,6 +31,8 @@ class WMXml
     // типы контракторв в арбитраже
     const CONTRACT_PUBLIC = 1;
     const CONTRACT_PRIVATE = 2;
+    // максимальный диапазон выборки в месяцах
+    const MAX_MONTH_DIAPASON = 3;
 
     /**
      * иницализация объекта
@@ -315,8 +317,14 @@ class WMXml
         $sign = $this->getSign($purse . $reqn);
 
         // устанавливаем даты, если они не переданы
-        $datestart = ($datestart) ? $datestart : (new DateTime("-3 month"));
+        $datestart = ($datestart) ? $datestart : (new DateTime("-".self::MAX_MONTH_DIAPASON." month"));
         $datefinish = ($datefinish) ? $datefinish : (new DateTime());
+
+        // если крайняя дата вылазиет за 3 месяца - подтягиваем её
+        $maxdiapason = new DateTime("-".self::MAX_MONTH_DIAPASON." month");
+        if ($datestart->getTimestamp() < $maxdiapason->getTimestamp()) {
+            $datestart->setTimestamp($maxdiapason->getTimestamp());
+        }
 
         $xml = '
             <w3s.request>
@@ -401,8 +409,14 @@ class WMXml
         $sign = $this->getSign($purse . $reqn);
 
         // устанавливаем даты, если они не переданы
-        $datestart = ($datestart) ? $datestart : (new DateTime("-3 month"));
+        $datestart = ($datestart) ? $datestart : (new DateTime("-".self::MAX_MONTH_DIAPASON." month"));
         $datefinish = ($datefinish) ? $datefinish : (new DateTime());
+
+        // если крайняя дата вылазиет за 3 месяца - подтягиваем её
+        $maxdiapason = new DateTime("-".self::MAX_MONTH_DIAPASON." month");
+        if ($datestart->getTimestamp() < $maxdiapason->getTimestamp()) {
+            $datestart->setTimestamp($maxdiapason->getTimestamp());
+        }
 
         $xml = '
             <w3s.request>
@@ -728,8 +742,14 @@ class WMXml
         $wmid = ($wmid) ? $wmid : $this->wmid;
 
         // устанавливаем даты, если они не переданы
-        $datestart = ($datestart) ? $datestart : (new DateTime("-3 month"));
+        $datestart = ($datestart) ? $datestart : (new DateTime("-".self::MAX_MONTH_DIAPASON." month"));
         $datefinish = ($datefinish) ? $datefinish : (new DateTime());
+
+        // если крайняя дата вылазиет за 3 месяца - подтягиваем её
+        $maxdiapason = new DateTime("-".self::MAX_MONTH_DIAPASON." month");
+        if ($datestart->getTimestamp() < $maxdiapason->getTimestamp()) {
+            $datestart->setTimestamp($maxdiapason->getTimestamp());
+        }
 
         $reqn = $this->getReqn();
         $sign = $this->getSign($wmid . $wminvid . $datestart->format($this->datePattern) . $datefinish->format($this->datePattern) . $reqn);
