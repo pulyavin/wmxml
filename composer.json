@@ -1,5 +1,5 @@
 {
-	"name": "pulyavin/WebMoney",
+	"name": "pulyavin/webmoney",
 	"type": "library",
 	"description": "WebMoney XML API on PHP",
 	"keywords": ["webmoney", "xml", "api", "WMXI"],
