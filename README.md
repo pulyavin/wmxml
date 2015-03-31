@@ -9,6 +9,28 @@ http://wiki.webmoney.ru/projects/webmoney/wiki/XML-%D0%B8%D0%BD%D1%82%D0%B5%D1%8
 
 https://cert.wmtransfer.com/regEnum/info.aspx?l=ru
 
+Установка
+---------
+Используйте менеджер пакетов Composer для установки пакета. Создайте файл composer.json со следующими строчками (или добавьте эти строчки в имеющийся, в соответствующий блок):
+
+```json
+{
+    "require": {
+        "pulyavin/wmxml": "0.1"
+    }
+}
+```
+
+И выполните установку пакета:
+
+```bash
+$ curl -s http://getcomposer.org/installer | php
+$ composer.phar install
+```
+
+Использование
+---------
+
 ```php
 # иницализация объекта работы с API
 $wmxml = new wmxml(
