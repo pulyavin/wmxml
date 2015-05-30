@@ -20,11 +20,11 @@ class xml4 extends Interfaces
         $sign = $this->keeper->getSign($purse . $reqn);
 
         // устанавливаем даты, если они не переданы
-        $datestart = ($datestart) ? $datestart : (new DateTime("-" . Constants::MAX_MONTH_DIAPASON . " month"));
+        $datestart = ($datestart) ? $datestart : (new DateTime("-" . Keeper::MAX_MONTH_DIAPASON . " month"));
         $datefinish = ($datefinish) ? $datefinish : (new DateTime());
 
         // если крайняя дата вылазиет за 3 месяца - подтягиваем её
-        $maxdiapason = new DateTime("-" . Constants::MAX_MONTH_DIAPASON . " month");
+        $maxdiapason = new DateTime("-" . Keeper::MAX_MONTH_DIAPASON . " month");
         if ($datestart->getTimestamp() < $maxdiapason->getTimestamp()) {
             $datestart->setTimestamp($maxdiapason->getTimestamp());
         }
