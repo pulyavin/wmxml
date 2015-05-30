@@ -12,29 +12,24 @@ https://cert.wmtransfer.com/regEnum/info.aspx?l=ru
 
 Установка
 ---------
-Используйте менеджер пакетов Composer для установки пакета. Создайте файл composer.json со следующими строчками (или добавьте эти строчки в блок зависимостей имеющегося файла):
+0. Используйте менеджер пакетов Composer для установки пакета. 
 
-```json
-{
-    "require": {
-        "pulyavin/wmxml": "dev-master"
-    }
-}
-```
+    ```
+    curl -sS https://getcomposer.org/installer | php
+    ```
 
-И выполните установку пакета:
+1. И выполните установку пакета:
 
-```bash
-$ curl -s http://getcomposer.org/installer | php
-$ composer.phar install
-```
+    ```
+    php composer.phar require 'pulyavin/wmxml:~1.0' 
+    ```
 
 Использование
 -------------
 
 ```php
 # иницализация объекта работы с API, используя скомпилированный wmsigner
-$wmxml = new pulyavin\WebMoney\WMXml(
+$wmxml = new pulyavin\wmxml\WMXml(
 	"classic",
 	[
 		"wmid" => "323724870812",
@@ -47,7 +42,7 @@ $wmxml = new pulyavin\WebMoney\WMXml(
 # иницализация объекта работы с API, используя wmsigner на PHP
 $wmsigner = new baibaratsky\WebMoney\Signer("323724870812", "./keyfile.kwm", "mykeypassword");
 
-$wmxml = new pulyavin\WebMoney\WMXml(
+$wmxml = new pulyavin\wmxml\WMXml(
 	"classic",
 	[
 		"wmid"     => "323724870812",

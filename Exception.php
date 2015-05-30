@@ -1,4 +1,4 @@
-<?php namespace pulyavin\WebMoney;
+<?php namespace pulyavin\wmxml;
 
 class Exception extends \Exception
 {

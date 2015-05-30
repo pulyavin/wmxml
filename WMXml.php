@@ -1,49 +1,45 @@
-<?php namespace pulyavin\WebMoney;
+<?php namespace pulyavin\wmxml;
 
 use DateTime;
-use baibaratsky\WebMoney\Signer;
+
+use pulyavin\wmxml\interfaces\xml1;
+use pulyavin\wmxml\interfaces\xml2;
+use pulyavin\wmxml\interfaces\xml3;
+use pulyavin\wmxml\interfaces\xml4;
+use pulyavin\wmxml\interfaces\xml5;
+use pulyavin\wmxml\interfaces\xml6;
+use pulyavin\wmxml\interfaces\xml8;
+use pulyavin\wmxml\interfaces\xml9;
+use pulyavin\wmxml\interfaces\xml10;
+use pulyavin\wmxml\interfaces\xml11;
+use pulyavin\wmxml\interfaces\xml13;
+use pulyavin\wmxml\interfaces\xml14;
+use pulyavin\wmxml\interfaces\xml151;
+use pulyavin\wmxml\interfaces\xml152;
+use pulyavin\wmxml\interfaces\xml153;
+use pulyavin\wmxml\interfaces\xml171;
+use pulyavin\wmxml\interfaces\xml172;
+use pulyavin\wmxml\interfaces\xml18;
+
+use pulyavin\wmxml\interfaces\bl;
+use pulyavin\wmxml\interfaces\tl;
+use pulyavin\wmxml\interfaces\claims;
+use pulyavin\wmxml\interfaces\info;
 
 class WMXml
 {
-    // внутренние константы
-    private $wmid;
-    private $wmsigner;
-    private $pem;
-    private $tranid;
-    // представление даты в WebMoney
-    private $datePattern = "Ymd H:i:s";
-    // тип WebMoney Keeper: WinPro (Classic) или WebPro (Light)
     private $keeper;
-    // хэндлер curl
-    private $curl;
-    // типы транзакций:
-    const TRANSAC_IN = "in"; // входящая транзакция
-    const TRANSAC_OUT = "out"; // исходящая транзакция
-    // типы переводов
-    const OPERTYPE_CLOSE = 0; // обычный (или с протекцией, завершенный успешно)
-    const OPERTYPE_PROTECTION = 4; // с протекцией (не завершена)
-    const OPERTYPE_BACK = 12; // с протекцией (вернулась)
-    // состояния счетов
-    const STATE_NOPAY = 0; // не оплачен
-    const STATE_PROTECT = 1; // оплачен по протекции
-    const STATE_PAID = 2; // оплачен окончательно
-    const STATE_DENIED = 3; // отказан
-    // типы контракторв в арбитраже
-    const CONTRACT_PUBLIC = 1;
-    const CONTRACT_PRIVATE = 2;
-    // максимальный диапазон выборки в месяцах
-    const MAX_MONTH_DIAPASON = 3;
 
     /**
      * иницализация объекта
-     * @param string $keeper тип WebMoney Keeper: WinPro (Classic) или WebPro (Light)
+     * @param string $keeper_type тип WebMoney Keeper: WinPro (Classic) или WebPro (Light)
      * @param array $data конфигурационный массив, содержащий следующие параметры:
      * [
      *   "wmid", // WMID, подписывающего запросы
      *   "tranid" // путь до txt-файла, хранящего значение следущего номера транзакции (tranid), если будет использоваться XML2
+     *   "rootca", // путь до корневого сертификата WebMoney Transfer
      *
      *   // если используется WM Keeper WinPro (Classic)
-     *   "rootca", // путь до корневого сертификата WebMoney Transfer
      *   "wmsigner"
      *      // способ №1 - использовать скомпилированный wmsigner
      *      "wmsigner", // путь до бинарного файла подписчика wmsigner
@@ -51,7 +47,7 @@ class WMXml
      *      "wmsigner", // инстанс класса Signer
      *
      *   // если используется WM Keeper WebPro (Light)
-     *   "pem", // путь до файла сертификата
+     *   "key", // путь до файла ключа
      *
      *   // необязательные атрибуты
      *   "connect", // время таймаута открытия соеднения в библиотеке CURL
@@ -59,91 +55,10 @@ class WMXml
      * ]
      * @throws \Exception
      */
-    public function __construct($keeper, array $data)
+    public function __construct($keeper_type, array $data)
     {
-        $wmid = isset($data['wmid']) ? $data['wmid'] : null;
-        $wmsigner = isset($data['wmsigner']) ? $data['wmsigner'] : null;
-        $rootca = isset($data['rootca']) ? $data['rootca'] : null;
-        $tranid = isset($data['tranid']) ? $data['tranid'] : null;
-        $pem = isset($data['pem']) ? $data['pem'] : null;
-        // настройки CURL-бибилотеки
-        $connect = isset($data['connect']) ? $data['connect'] : 5;
-        $timeout = isset($data['timeout']) ? $data['timeout'] : 5;
-
-        // не указано то самое главное...
-        if (empty($wmid)) {
-            throw new \Exception("Unknown WMID");
-        }
-
-        // устанавливаем тип WebMoney Keeper
-        if ($keeper == "classic") {
-            // мы работаем с бинарным подписчиком
-            if (!self::isPhpSigner($wmsigner)) {
-                // проверяем корректность путей к файлам
-                if (empty($wmsigner)) {
-                    throw new \Exception("Unknown wmsigner-file path");
-                }
-                if (!realpath($wmsigner)) {
-                    throw new \Exception("Incorrect wmsigner-file path");
-                }
-
-                $wmsigner = realpath($wmsigner);
-            }
-
-            if (empty($rootca)) {
-                throw new \Exception("Unknown rootca-file path");
-            }
-            if (!realpath($rootca)) {
-                throw new \Exception("Incorrect rootca-file path");
-            }
-
-            $this->wmsigner = $wmsigner;
-        } else if ($keeper == "light") {
-            if (empty($pem)) {
-                throw new \Exception("Unknown pem-file path");
-            }
-
-            // проверяем корректность путей к файлам
-            if (!realpath($pem)) {
-                throw new \Exception("Incorrect pem-file path");
-            }
-
-            $this->pem = realpath($pem);
-        } else {
-            throw new \Exception("Incorrect type of WebMoney Keeper");
-        }
-
-        // устанавливаем общие параметры
-        $this->wmid = $wmid;
-        $this->keeper = $keeper;
-
-        // нам указали путь до tranid.txt
-        if (!empty($tranid)) {
-            if (!realpath($tranid)) {
-                throw new \Exception("Incorrect tranid-file path");
-            }
-
-            if (!is_writable(realpath($tranid))) {
-                throw new \Exception("tranid file not writable");
-            }
-
-            $this->tranid = realpath($tranid);
-        }
-
-        // инициализиуер объект CURL и настраиваем его
-        $this->curl = curl_init();
-        curl_setopt_array($this->curl, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_POST           => true,
-            // SSL-сертификат
-            CURLOPT_CAINFO         => realpath($rootca),
-            CURLOPT_SSL_VERIFYPEER => true,
-            // соединяемся и ждём ожидания, но не больше указанного кол-ва секунд
-            CURLOPT_CONNECTTIMEOUT => $connect,
-            CURLOPT_TIMEOUT        => $timeout,
-        ]);
+        $this->keeper = new Keeper($keeper_type, $data);
     }
-
 
     /**
      * XML: X1, выписка счёта
@@ -161,66 +76,29 @@ class WMXml
      */
     public function xml1($wmid, $purse, $amount, $desc, $orderid = 0, $address = "", $period = 0, $expiration = 7, $onlyauth = 0, $shop_id = 0)
     {
-        $reqn = $this->getReqn();
-        $desc = htmlspecialchars(trim($desc), ENT_QUOTES);
-        $address = htmlspecialchars(trim($address), ENT_QUOTES);
-        $amount = (float)$amount;
+        $data = [
+            'wmid'       => $wmid,
+            'purse'      => $purse,
+            'amount'     => $amount,
+            'desc'       => $desc,
+            'orderid'    => $orderid,
+            'address'    => $address,
+            'period'     => $period,
+            'expiration' => $expiration,
+            'onlyauth'   => $onlyauth,
+            'shop_id'    => $shop_id
+        ];
 
-        // ебануться, грёбанный полаллен!
-        $desc_temp = mb_convert_encoding($desc, "CP1251", "UTF-8");
-        $address_temp = mb_convert_encoding($address, "CP1251", "UTF-8");
+        $interface = new xml1($this->keeper);
+        $interface->storeData($data);
 
-        $sign = $this->getSign($orderid . $wmid . $purse . $amount . $desc_temp . $address_temp . $period . $expiration . $reqn);
-
-        $xml = '
-            <w3s.request>
-                <reqn>' . $reqn . '</reqn>
-                <wmid>' . $this->wmid . '</wmid>
-                <sign>' . $sign . '</sign>
-                <invoice>
-                    <orderid>' . $orderid . '</orderid>
-                    <customerwmid>' . $wmid . '</customerwmid>
-                    <storepurse>' . $purse . '</storepurse>
-                    <amount>' . $amount . '</amount>
-                    <desc>' . $desc . '</desc>
-                    <address>' . $address . '</address>
-                    <period>' . $period . '</period>
-                    <expiration>' . $expiration . '</expiration>
-                    <onlyauth>' . $onlyauth . '</onlyauth>
-                    <lmi_shop_id>' . $shop_id . '</lmi_shop_id>
-                </invoice>
-            </w3s.request>
-        ';
-
-        // получаем подпарщенный XML-пакет
         try {
-            $xml = $this->getObject("1", $xml);
-        } catch (Exception $e) {
-            return [
-                'is_error'      => 1,
-                'error_message' => $e->getMessage(),
-                'error_code'    => $e->getCode(),
-            ];
+            $xml = $this->keeper->sendRequest($interface);
+        } catch (\Exception $e) {
+            return $this->fail($e->getMessage(), $e->getCode());
         }
 
-        return [
-            'is_error' => 0,
-            'data'     => [
-                'id'           => (int)$xml->invoice['id'],
-                'ts'           => (int)$xml->invoice['ts'],
-                'orderid'      => (int)$xml->invoice->orderid,
-                'customerwmid' => (string)$xml->invoice->customerwmid,
-                'storepurse'   => (string)$xml->invoice->storepurse,
-                'amount'       => (float)$xml->invoice->amount,
-                'desc'         => (string)$xml->invoice->desc,
-                'address'      => (string)$xml->invoice->address,
-                'period'       => (int)$xml->invoice->period,
-                'expiration'   => (int)$xml->invoice->expiration,
-                'state'        => (int)$xml->invoice->state,
-                'datecrt'      => new DateTime((string)$xml->invoice->datecrt),
-                'dateupd'      => new DateTime((string)$xml->invoice->dateupd),
-            ]
-        ];
+        return $this->success($interface->getData($xml));
     }
 
     /**
@@ -237,66 +115,27 @@ class WMXml
      */
     public function xml2($at_purse, $to_purse, $amount, $desc, $protect_period = 0, $protect_code = "", $wminvid = 0, $onlyauth = 0)
     {
-        $tranid = $this->getTranid();
-        $reqn = $this->getReqn();
-        $desc = htmlspecialchars(trim($desc), ENT_QUOTES);
-        $protect_code = htmlspecialchars(trim($protect_code), ENT_QUOTES);
-        $amount = floatval($amount);
+        $data = [
+            'at_purse'       => $at_purse,
+            'to_purse'       => $to_purse,
+            'amount'         => $amount,
+            'desc'           => $desc,
+            'protect_period' => $protect_period,
+            'protect_code'   => $protect_code,
+            'wminvid'        => $wminvid,
+            'onlyauth'       => $onlyauth
+        ];
 
-        // ебануться, грёбанный полаллен!
-        $desc_temp = mb_convert_encoding($desc, "CP1251", "UTF-8");
-        $protect_temp = mb_convert_encoding($protect_code, "CP1251", "UTF-8");
+        $interface = new xml2($this->keeper);
+        $interface->storeData($data);
 
-        $sign = $this->getSign($reqn . $tranid . $at_purse . $to_purse . $amount . $protect_period . $protect_temp . $desc_temp . $wminvid);
-
-        $xml = '
-            <w3s.request>
-                <reqn>' . $reqn . '</reqn>
-                <wmid>' . $this->wmid . '</wmid>
-                <sign>' . $sign . '</sign>
-                <trans>
-                    <tranid>' . $tranid . '</tranid>
-                    <pursesrc>' . $at_purse . '</pursesrc>
-                    <pursedest>' . $to_purse . '</pursedest>
-                    <amount>' . $amount . '</amount>
-                    <period>' . $protect_period . '</period>
-                    <pcode>' . $protect_code . '</pcode>
-                    <desc>' . $desc . '</desc>
-                    <wminvid>' . $wminvid . '</wminvid>
-                    <onlyauth>' . $onlyauth . '</onlyauth>
-                </trans>
-            </w3s.request>
-        ';
-
-        // получаем подпарщенный XML-пакет
         try {
-            $xml = $this->getObject("2", $xml);
-        } catch (Exception $e) {
-            return [
-                'is_error'      => 1,
-                'error_message' => $e->getMessage(),
-                'error_code'    => $e->getCode(),
-            ];
+            $xml = $this->keeper->sendRequest($interface);
+        } catch (\Exception $e) {
+            return $this->fail($e->getMessage(), $e->getCode());
         }
 
-        return [
-            'is_error' => 0,
-            'data'     => [
-                'id'        => (int)$xml->operation['id'],
-                'ts'        => (int)$xml->operation['ts'],
-                'tranid'    => (int)$xml->operation->tranid,
-                'pursesrc'  => (string)$xml->operation->pursesrc,
-                'pursedest' => (string)$xml->operation->pursedest,
-                'amount'    => (float)$xml->operation->amount,
-                'comiss'    => (float)$xml->operation->comiss,
-                'opertype'  => (int)$xml->operation->opertype,
-                'period'    => (int)$xml->operation->period,
-                'wminvid'   => (int)$xml->operation->wminvid,
-                'desc'      => (string)$xml->operation->desc,
-                'datecrt'   => new DateTime((string)$xml->operation->datecrt),
-                'dateupd'   => new DateTime((string)$xml->operation->dateupd),
-            ]
-        ];
+        return $this->success($interface->getData($xml));
     }
 
     /**
@@ -313,84 +152,26 @@ class WMXml
      */
     public function xml3($purse, DateTime $datestart = null, DateTime $datefinish = null, $wmtranid = 0, $tranid = 0, $wminvid = 0, $orderid = 0)
     {
-        $reqn = $this->getReqn();
-        $sign = $this->getSign($purse . $reqn);
-
-        // устанавливаем даты, если они не переданы
-        $datestart = ($datestart) ? $datestart : (new DateTime("-".self::MAX_MONTH_DIAPASON." month"));
-        $datefinish = ($datefinish) ? $datefinish : (new DateTime());
-
-        // если крайняя дата вылазиет за 3 месяца - подтягиваем её
-        $maxdiapason = new DateTime("-".self::MAX_MONTH_DIAPASON." month");
-        if ($datestart->getTimestamp() < $maxdiapason->getTimestamp()) {
-            $datestart->setTimestamp($maxdiapason->getTimestamp());
-        }
-
-        $xml = '
-            <w3s.request>
-                <reqn>' . $reqn . '</reqn>
-                <wmid>' . $this->wmid . '</wmid>
-                <sign>' . $sign . '</sign>
-                <getoperations>
-                    <purse>' . $purse . '</purse>
-                    <wmtranid>' . $wmtranid . '</wmtranid>
-                    <tranid>' . $tranid . '</tranid>
-                    <wminvid>' . $wminvid . '</wminvid>
-                    <orderid>' . $orderid . '</orderid>
-                    <datestart>' . $datestart->format($this->datePattern) . '</datestart>
-                    <datefinish>' . $datefinish->format($this->datePattern) . '</datefinish>
-                </getoperations>
-            </w3s.request>
-        ';
-
-        // получаем подпарщенный XML-пакет
-        try {
-            $xml = $this->getObject("3", $xml);
-        } catch (Exception $e) {
-            return [
-                'is_error'      => 1,
-                'error_message' => $e->getMessage(),
-                'error_code'    => $e->getCode(),
-            ];
-        }
-
-        $operations = [];
-        foreach ($xml->operations->operation as $operation) {
-            if ($operation->pursesrc == $purse) {
-                $type = self::TRANSAC_OUT;
-                $corrpurse = (string)$operation->pursedest;
-            } else {
-                $type = self::TRANSAC_IN;
-                $corrpurse = (string)$operation->pursesrc;
-            }
-
-            $operations[] = [
-                'id'        => (int)$operation['id'],
-                'ts'        => (int)$operation['ts'],
-                'pursesrc'  => (string)$operation->pursesrc,
-                'pursedest' => (string)$operation->pursedest,
-                'type'      => $type,
-                'corrpurse' => $corrpurse,
-                'amount'    => (float)$operation->amount,
-                'comiss'    => (float)$operation->comiss,
-                'opertype'  => (int)$operation->opertype,
-                'wminvid'   => (int)$operation->wminvid,
-                'orderid'   => (int)$operation->orderid,
-                'tranid'    => (int)$operation->tranid,
-                'period'    => (int)$operation->period,
-                'desc'      => (string)$operation->desc,
-                'datecrt'   => new DateTime((string)$operation->datecrt),
-                'dateupd'   => new DateTime((string)$operation->dateupd),
-                'corrwm'    => (string)$operation->corrwm,
-                'rest'      => (float)$operation->rest,
-                'timelock'  => (string)$operation->timelock,
-            ];
-        }
-
-        return [
-            'is_error' => 0,
-            'data'     => $operations,
+        $data = [
+            'purse'      => $purse,
+            'datestart'  => $datestart,
+            'datefinish' => $datefinish,
+            'wmtranid'   => $wmtranid,
+            'tranid'     => $tranid,
+            'wminvid'    => $wminvid,
+            'orderid'    => $orderid
         ];
+
+        $interface = new xml3($this->keeper);
+        $interface->storeData($data);
+
+        try {
+            $xml = $this->keeper->sendRequest($interface);
+        } catch (\Exception $e) {
+            return $this->fail($e->getMessage(), $e->getCode());
+        }
+
+        return $this->success($interface->getData($xml));
     }
 
     /**
@@ -405,70 +186,24 @@ class WMXml
      */
     public function xml4($purse, DateTime $datestart = null, DateTime $datefinish = null, $wminvid = 0, $orderid = 0)
     {
-        $reqn = $this->getReqn();
-        $sign = $this->getSign($purse . $reqn);
-
-        // устанавливаем даты, если они не переданы
-        $datestart = ($datestart) ? $datestart : (new DateTime("-".self::MAX_MONTH_DIAPASON." month"));
-        $datefinish = ($datefinish) ? $datefinish : (new DateTime());
-
-        // если крайняя дата вылазиет за 3 месяца - подтягиваем её
-        $maxdiapason = new DateTime("-".self::MAX_MONTH_DIAPASON." month");
-        if ($datestart->getTimestamp() < $maxdiapason->getTimestamp()) {
-            $datestart->setTimestamp($maxdiapason->getTimestamp());
-        }
-
-        $xml = '
-            <w3s.request>
-                <reqn>' . $reqn . '</reqn>
-                <wmid>' . $this->wmid . '</wmid>
-                <sign>' . $sign . '</sign>
-                <getoutinvoices>
-                    <purse>' . $purse . '</purse>
-                    <wminvid>' . $wminvid . '</wminvid>
-                    <orderid>' . $orderid . '</orderid>
-                    <datestart>' . $datestart->format($this->datePattern) . '</datestart>
-                    <datefinish>' . $datefinish->format($this->datePattern) . '</datefinish>
-                </getoutinvoices>
-            </w3s.request>
-        ';
-
-        // получаем подпарщенный XML-пакет
-        try {
-            $xml = $this->getObject("4", $xml);
-        } catch (Exception $e) {
-            return [
-                'is_error'      => 1,
-                'error_message' => $e->getMessage(),
-                'error_code'    => $e->getCode(),
-            ];
-        }
-
-        $invoices = [];
-        foreach ($xml->outinvoices->outinvoice as $invoice) {
-            $invoices[] = [
-                'id'            => (int)$invoice['id'],
-                'ts'            => (int)$invoice['ts'],
-                'orderid'       => (int)$invoice->orderid,
-                'storepurse'    => (string)$invoice->storepurse,
-                'customerwmid'  => (string)$invoice->customerwmid,
-                'customerpurse' => (string)$invoice->customerpurse,
-                'amount'        => (float)$invoice->amount,
-                'datecrt'       => new DateTime((string)$invoice->datecrt),
-                'dateupd'       => new DateTime((string)$invoice->dateupd),
-                'state'         => (int)$invoice->state,
-                'address'       => (string)$invoice->address,
-                'desc'          => (string)$invoice->desc,
-                'period'        => (int)$invoice->period,
-                'expiration'    => (int)$invoice->expiration,
-                'wmtranid'      => (int)$invoice->wmtranid,
-            ];
-        }
-
-        return [
-            'is_error' => 0,
-            'data'     => $invoices,
+        $data = [
+            'purse'      => $purse,
+            'datestart'  => $datestart,
+            'datefinish' => $datefinish,
+            'wminvid'    => $wminvid,
+            'orderid'    => $orderid
         ];
+
+        $interface = new xml4($this->keeper);
+        $interface->storeData($data);
+
+        try {
+            $xml = $this->keeper->sendRequest($interface);
+        } catch (\Exception $e) {
+            return $this->fail($e->getMessage(), $e->getCode());
+        }
+
+        return $this->success($interface->getData($xml));
     }
 
     /**
@@ -479,44 +214,21 @@ class WMXml
      */
     public function xml5($wmtranid, $pcode)
     {
-        $reqn = $this->getReqn();
-        $sign = $this->getSign($wmtranid . $pcode . $reqn);
+        $data = [
+            'wmtranid' => $wmtranid,
+            'pcode'    => $pcode,
+        ];
 
-        $xml = '
-            <w3s.request>
-                <reqn>' . $reqn . '</reqn>
-                <wmid>' . $this->wmid . '</wmid>
-                <sign>' . $sign . '</sign>
-                <finishprotect>
-                    <wmtranid>' . $wmtranid . '</wmtranid>
-                    <pcode>' . $pcode . '</pcode>
-                </finishprotect>
-            </w3s.request>
-        ';
+        $interface = new xml5($this->keeper);
+        $interface->storeData($data);
 
-        // получаем подпарщенный XML-пакет
         try {
-            $xml = $this->getObject("5", $xml);
-        } catch (Exception $e) {
-            return [
-                'is_error'      => 1,
-                'error_message' => $e->getMessage(),
-                'error_code'    => $e->getCode(),
-            ];
+            $xml = $this->keeper->sendRequest($interface);
+        } catch (\Exception $e) {
+            return $this->fail($e->getMessage(), $e->getCode());
         }
 
-        $opertype = (int)$xml->operation->opertype;
-
-        return [
-            'is_error' => 0,
-            'data'     => [
-                'id'       => (int)$xml->operation['id'],
-                'ts'       => (int)$xml->operation['ts'],
-                'opertype' => $opertype,
-                'dateupd'  => new DateTime((string)$xml->operation->dateupd),
-                'success'  => (!$opertype) ? true : false,
-            ]
-        ];
+        return $this->success($interface->getData($xml));
     }
 
     /**
@@ -528,50 +240,22 @@ class WMXml
      */
     public function xml6($wmid, $message, $subject = "")
     {
-        $reqn = $this->getReqn();
-        $message = htmlspecialchars(trim($message), ENT_QUOTES);
-        $subject = htmlspecialchars(trim($subject), ENT_QUOTES);
+        $data = [
+            'wmid'    => $wmid,
+            'message' => $message,
+            'subject' => $subject,
+        ];
 
-        // ебануться, грёбанный полаллен!
-        $message_temp = mb_convert_encoding($message, "CP1251", "UTF-8");
-        $subject_temp = mb_convert_encoding($subject, "CP1251", "UTF-8");
+        $interface = new xml6($this->keeper);
+        $interface->storeData($data);
 
-        $sign = $this->getSign($wmid . $reqn . $message_temp . $subject_temp);
-
-        $xml = '
-            <w3s.request>
-                <reqn>' . $reqn . '</reqn>
-                <wmid>' . $this->wmid . '</wmid>
-                <sign>' . $sign . '</sign>
-                <message>
-                    <receiverwmid>' . $wmid . '</receiverwmid>
-                    <msgsubj>' . $subject . '</msgsubj>
-                    <msgtext>' . $message . '</msgtext>
-                </message>
-            </w3s.request>
-        ';
-
-        // получаем подпарщенный XML-пакет
         try {
-            $xml = $this->getObject("6", $xml);
-        } catch (Exception $e) {
-            return [
-                'is_error'      => 1,
-                'error_message' => $e->getMessage(),
-                'error_code'    => $e->getCode(),
-            ];
+            $xml = $this->keeper->sendRequest($interface);
+        } catch (\Exception $e) {
+            return $this->fail($e->getMessage(), $e->getCode());
         }
 
-        return [
-            'is_error' => 0,
-            'data'     => [
-                'id'           => (int)$xml->message['id'],
-                'receiverwmid' => (string)$xml->message->receiverwmid,
-                'msgsubj'      => (string)$xml->message->msgsubj,
-                'msgtext'      => (string)$xml->message->msgtext,
-                'datecrt'      => new DateTime((string)$xml->message->datecrt),
-            ]
-        ];
+        return $this->success($interface->getData($xml));
     }
 
     /**
@@ -582,95 +266,21 @@ class WMXml
      */
     public function xml8($wmid = null, $purse = null)
     {
-        $reqn = $this->getReqn();
-        $sign = $this->getSign($wmid . $purse);
-
-        $xml = '
-            <w3s.request>
-                <reqn>' . $reqn . '</reqn>
-                <wmid>' . $this->wmid . '</wmid>
-                <sign>' . $sign . '</sign>
-                <testwmpurse>
-                    <wmid>' . $wmid . '</wmid>
-                    <purse>' . $purse . '</purse>
-                </testwmpurse>
-            </w3s.request>
-        ';
-
-        // получаем подпарщенный XML-пакет
-        try {
-            $xml = $this->getObject("8", $xml);
-        } catch (Exception $e) {
-            return [
-                'is_error'      => 1,
-                'error_message' => $e->getMessage(),
-                'error_code'    => $e->getCode(),
-            ];
-        }
-
-        $return = [
-            'is_error' => 0,
-            'data'     => [],
+        $data = [
+            'wmid'  => $wmid,
+            'purse' => $purse,
         ];
 
-        // проверяем существование wmid
-        if (
-            $wmid
-            &&
-            $purse == null
-        ) {
-            $return['data'] = [
-                'wmid' => [
-                    'exists'            => ($xml->retval == "1") ? true : false,
-                    'available'         => (int)$xml->testwmpurse->wmid['available'],
-                    'themselfcorrstate' => (int)$xml->testwmpurse->wmid['themselfcorrstate'],
-                    'newattst'          => (int)$xml->testwmpurse->wmid['newattst'],
-                ],
-            ];
-        } // проверяем существование кошелька
-        else if (
-            $wmid == null
-            &&
-            $purse
-        ) {
-            $exists = ($xml->retval == "1") ? true : false;
+        $interface = new xml8($this->keeper);
+        $interface->storeData($data);
 
-            if ($exists) {
-                $return['data']['wmid'] = [
-                    'wmid'              => (string)$xml->testwmpurse->wmid,
-                    'available'         => ($xml->testwmpurse->wmid['available'] == "-1") ? false : true,
-                    'themselfcorrstate' => (int)$xml->testwmpurse->wmid['themselfcorrstate'],
-                    'newattst'          => (int)$xml->testwmpurse->wmid['newattst'],
-                ];
-            }
-
-            $return['data']['purse'] = [
-                'exists'                 => $exists,
-                'merchant_active_mode'   => (int)$xml->testwmpurse->purse['merchant_active_mode'],
-                'merchant_allow_cashier' => (int)$xml->testwmpurse->purse['merchant_allow_cashier'],
-            ];
-        } // проверяем принадлежность кошелька к wmid
-        else {
-            $belongs = (((string)$xml->testwmpurse->purse) == $purse) ? true : false;
-
-            $return['data'] = [
-                'wmid'    => [
-                    'available'         => ($xml->testwmpurse->wmid['available'] == "-1") ? false : true,
-                    'themselfcorrstate' => (int)$xml->testwmpurse->wmid['themselfcorrstate'],
-                    'newattst'          => (int)$xml->testwmpurse->wmid['newattst'],
-                ],
-                'belongs' => $belongs,
-            ];
-
-            if ($belongs) {
-                $return['data']['purse'] = [
-                    'merchant_active_mode'   => (int)$xml->testwmpurse->purse['merchant_active_mode'],
-                    'merchant_allow_cashier' => (int)$xml->testwmpurse->purse['merchant_allow_cashier'],
-                ];
-            }
+        try {
+            $xml = $this->keeper->sendRequest($interface);
+        } catch (\Exception $e) {
+            return $this->fail($e->getMessage(), $e->getCode());
         }
 
-        return $return;
+        return $this->success($interface->getData($xml));
     }
 
     /**
@@ -680,52 +290,22 @@ class WMXml
      */
     public function xml9($wmid = null)
     {
-        $reqn = $this->getReqn();
-        $sign = $this->getSign($this->wmid . $reqn);
-        // если не передан WMID - используем системный
-        $wmid = ($wmid) ? $wmid : $this->wmid;
+        $wmid = ($wmid) ? $wmid : $this->keeper->wmid;
 
-        $xml = '
-            <w3s.request>
-                <reqn>' . $reqn . '</reqn>
-                <wmid>' . $this->wmid . '</wmid>
-                <sign>' . $sign . '</sign>
-                <getpurses>
-                    <wmid>' . $wmid . '</wmid>
-                </getpurses>
-            </w3s.request>
-        ';
-
-        // получаем подпарщенный XML-пакет
-        try {
-            $xml = $this->getObject("9", $xml);
-        } catch (Exception $e) {
-            return [
-                'is_error'      => 1,
-                'error_message' => $e->getMessage(),
-                'error_code'    => $e->getCode(),
-            ];
-        }
-
-        $purses = [];
-        foreach ($xml->purses->purse as $purse) {
-            $pursename = (string)$purse->pursename;
-            $purses[$pursename] = [
-                'id'               => (int)$purse['id'],
-                'pursename'        => $pursename,
-                'amount'           => (float)$purse->amount,
-                'desc'             => (string)$purse->desc,
-                'outsideopen'      => (int)$purse->outsideopen,
-                'outsideopenstate' => (int)$purse->outsideopenstate,
-                'lastintr'         => (int)$purse->lastintr,
-                'lastouttr'        => (int)$purse->lastouttr,
-            ];
-        }
-
-        return [
-            'is_error' => 0,
-            'data'     => $purses,
+        $data = [
+            'wmid' => $wmid
         ];
+
+        $interface = new xml9($this->keeper);
+        $interface->storeData($data);
+
+        try {
+            $xml = $this->keeper->sendRequest($interface);
+        } catch (\Exception $e) {
+            return $this->fail($e->getMessage(), $e->getCode());
+        }
+
+        return $this->success($interface->getData($xml));
     }
 
     /**
@@ -739,70 +319,25 @@ class WMXml
      */
     public function xml10($wmid = null, $wminvid = 0, DateTime $datestart = null, DateTime $datefinish = null)
     {
-        $wmid = ($wmid) ? $wmid : $this->wmid;
+        $wmid = ($wmid) ? $wmid : $this->keeper->wmid;
 
-        // устанавливаем даты, если они не переданы
-        $datestart = ($datestart) ? $datestart : (new DateTime("-".self::MAX_MONTH_DIAPASON." month"));
-        $datefinish = ($datefinish) ? $datefinish : (new DateTime());
-
-        // если крайняя дата вылазиет за 3 месяца - подтягиваем её
-        $maxdiapason = new DateTime("-".self::MAX_MONTH_DIAPASON." month");
-        if ($datestart->getTimestamp() < $maxdiapason->getTimestamp()) {
-            $datestart->setTimestamp($maxdiapason->getTimestamp());
-        }
-
-        $reqn = $this->getReqn();
-        $sign = $this->getSign($wmid . $wminvid . $datestart->format($this->datePattern) . $datefinish->format($this->datePattern) . $reqn);
-
-        $xml = '
-            <w3s.request>
-                <reqn>' . $reqn . '</reqn>
-                <wmid>' . $this->wmid . '</wmid>
-                <sign>' . $sign . '</sign>
-                <getininvoices>
-                    <wmid>' . $wmid . '</wmid>
-                    <wminvid>' . $wminvid . '</wminvid>
-                    <datestart>' . $datestart->format($this->datePattern) . '</datestart>
-                    <datefinish>' . $datefinish->format($this->datePattern) . '</datefinish>
-                </getininvoices>
-            </w3s.request>
-        ';
-
-        // получаем подпарщенный XML-пакет
-        try {
-            $xml = $this->getObject("10", $xml);
-        } catch (Exception $e) {
-            return [
-                'is_error'      => 1,
-                'error_message' => $e->getMessage(),
-                'error_code'    => $e->getCode(),
-            ];
-        }
-
-        $invoices = [];
-        foreach ($xml->ininvoices->ininvoice as $invoice) {
-            $invoices[] = [
-                'id'         => (int)$invoice['id'],
-                'ts'         => (int)$invoice['ts'],
-                'orderid'    => (int)$invoice->orderid,
-                'storewmid'  => (string)$invoice->storewmid,
-                'storepurse' => (string)$invoice->storepurse,
-                'amount'     => (float)$invoice->amount,
-                'datecrt'    => new DateTime((string)$invoice->datecrt),
-                'dateupd'    => new DateTime((string)$invoice->dateupd),
-                'state'      => (int)$invoice->state,
-                'address'    => (string)$invoice->address,
-                'desc'       => (string)$invoice->desc,
-                'period'     => (int)$invoice->period,
-                'expiration' => (int)$invoice->expiration,
-                'wmtranid'   => (int)$invoice->wmtranid,
-            ];
-        }
-
-        return [
-            'is_error' => 0,
-            'data'     => $invoices,
+        $data = [
+            'wmid'      => $wmid,
+            'wminvid'   => $wminvid,
+            'datestart' => $datestart,
+            'datefinis' => $datefinish
         ];
+
+        $interface = new xml10($this->keeper);
+        $interface->storeData($data);
+
+        try {
+            $xml = $this->keeper->sendRequest($interface);
+        } catch (\Exception $e) {
+            return $this->fail($e->getMessage(), $e->getCode());
+        }
+
+        return $this->success($interface->getData($xml));
     }
 
     /**
@@ -812,188 +347,22 @@ class WMXml
      */
     public function xml11($wmid = null)
     {
-        $wmid = ($wmid) ? $wmid : $this->wmid;
+        $wmid = ($wmid) ? $wmid : $this->keeper->wmid;
 
-        $sign = $this->getSign($this->wmid . $wmid);
-
-        $xml = '
-            <w3s.request>
-                <wmid>' . $this->wmid . '</wmid>
-                <passportwmid>' . $wmid . '</passportwmid>
-                <sign>' . $sign . '</sign>
-                <params>
-                    <dict>0</dict>
-                    <info>1</info>
-                    <mode>1</mode>
-                </params>
-            </w3s.request>
-        ';
-
-        // получаем подпарщенный XML-пакет
-        try {
-            $xml = $this->getObject("11", $xml);
-        } catch (Exception $e) {
-            return [
-                'is_error'      => 1,
-                'error_message' => $e->getMessage(),
-                'error_code'    => $e->getCode(),
-            ];
-        }
-
-        // собираем список WMID, прикрепленных к данному аттестату
-        $wmids = [];
-        foreach ($xml->certinfo->wmids->row as $wmid) {
-            $wmids[(int)$wmid['wmid']] = [
-                'wmid'        => (string)$wmid['wmid'],
-                'info'        => (string)$wmid['info'], // Дополнительная информация о WMID.
-                'nickname'    => (string)$wmid['nickname'], // Псевдоним (название проекта)
-                'datereg'     => new DateTime((string)$wmid['datereg']), // Дата и время (московское) регистрации WMID в системе
-                'ctype'       => (int)$wmid['ctype'], // Юридический статус WMID (1 - используется в интересах физического лица, 2 - юридического)
-                'companyname' => (string)$wmid['companyname'], // Название компании (Заполняется только для юридических лиц)
-                'companyid'   => (string)$wmid['companyid'], // Регистрационный номер компании. ИНН (для российских компаний) КОД ЕГРПОУ (для украинских), Certificate number и т.п.
-                'phone'       => (string)$wmid['phone'],
-                'email'       => (string)$wmid['email'],
-            ];
-        }
-
-        // собираем список веб-сайтов аттестата
-        $weblists = [];
-        foreach ($xml->certinfo->userinfo->weblist->row as $weblist) {
-            $weblists[] = [
-                'url'        => (string)$weblist['url'],
-                'check-lock' => (string)$weblist['check-lock'],
-                'ischeck'    => (int)$weblist['ischeck'],
-                'islock'     => (int)$weblist['islock'],
-            ];
-        }
-
-        // собираем дополнительные данные
-        $extendeddata = [];
-        foreach ($xml->certinfo->userinfo->extendeddata->row as $data) {
-            $extendeddata[] = [
-                'type'       => (string)$data['type'],
-                'account'    => (string)$data['account'],
-                'check-lock' => (int)$data['check-lock'],
-            ];
-        }
-
-        return [
-            'is_error' => 0,
-            'data'     => [
-                'fullaccess'   => (int)$xml->fullaccess, // индикатор наличия доступа к закрытым полям аттестата
-                // информация об аттестате
-                'attestat'     => [
-                    'tid'          => (int)$xml->certinfo->attestat->row['tid'], // Тип аттестата
-                    'recalled'     => (int)$xml->certinfo->attestat->row['recalled'], // Информация об отказе в обслуживании
-                    'datecrt'      => new DateTime((string)$xml->certinfo->attestat->row['datecrt']), // Дата и время (московское) выдачи аттестата
-                    'dateupd'      => new DateTime((string)$xml->certinfo->attestat->row['dateupd']), // Дата и время (московское) последнего изменения данных
-                    'regnickname'  => (string)$xml->certinfo->attestat->row['regnickname'], // Название проекта, имя (nick) аттестатора, выдавшего данный аттестат
-                    'regwmid'      => (string)$xml->certinfo->attestat->row['regwmid'], // WMID аттестатора, выдавшего данный аттестат
-                    'status'       => (int)$xml->certinfo->attestat->row['status'], // признак прохождения вторичной проверки (10 - не пройдена, 11 - пройдена)
-                    'is_secondary' => (((int)$xml->certinfo->attestat->row['status']) == "11") ? true : false, // признак прохождения вторичной проверки
-                    'notary'       => (int)$xml->certinfo->attestat->row['notary'], // особенность получения аттестата (0 - личная встреча, 1 - нотариально заверенные документы, 2 - автоматически, по результатам успешного пополнения кошелька)
-                ],
-                // список WMID, прикрепленных к данному аттестату
-                'wmids'        => $wmids,
-                // персональные данные владельца аттестата
-                'userinfo'     => [
-                    // персональная информация
-                    'nickname'   => (string)$xml->certinfo->userinfo->value->row['nickname'], // название проекта, имя (nickname)
-                    'fname'      => (string)$xml->certinfo->userinfo->value->row['fname'], // фамилия
-                    'iname'      => (string)$xml->certinfo->userinfo->value->row['iname'], // имя
-                    'oname'      => (string)$xml->certinfo->userinfo->value->row['oname'], // отчество
-                    'bdate'      => (new DateTime())->setDate((int)$xml->certinfo->userinfo->value->row['byear'], (int)$xml->certinfo->userinfo->value->row['bmonth'], (int)$xml->certinfo->userinfo->value->row['bday']), // дата рождения
-                    'byear'      => ((int)$xml->certinfo->userinfo->value->row['byear']), // дата рождения (год)
-                    'phone'      => ((string)$xml->certinfo->userinfo->value->row['phone']),
-                    'email'      => ((string)$xml->certinfo->userinfo->value->row['email']),
-                    'web'        => ((string)$xml->certinfo->userinfo->value->row['web']),
-                    'sex'        => ((int)$xml->certinfo->userinfo->value->row['sex']), // пол
-                    'icq'        => ((int)$xml->certinfo->userinfo->value->row['icq']),
-                    'rcountry'   => ((string)$xml->certinfo->userinfo->value->row['rcountry']), // место (страна) постоянной регистрации
-                    'rcity'      => ((string)$xml->certinfo->userinfo->value->row['rcity']), // место (город) постоянной регистрации
-                    'rcountryid' => ((int)$xml->certinfo->userinfo->value->row['rcountryid']),
-                    'rcitid'     => ((int)$xml->certinfo->userinfo->value->row['rcitid']),
-                    'radres'     => ((string)$xml->certinfo->userinfo->value->row['radres']), // место (полный адрес) постоянной регистрации
-                    // почтовый адрес
-                    'country'    => (string)$xml->certinfo->userinfo->value->row['country'], // почтовый адрес - страна
-                    'city'       => (string)$xml->certinfo->userinfo->value->row['city'], // почтовый адрес - город
-                    'region'     => (string)$xml->certinfo->userinfo->value->row['region'], // регион, область
-                    'zipcode'    => (int)$xml->certinfo->userinfo->value->row['zipcode'], // почтовый адрес -индекс
-                    'adres'      => (string)$xml->certinfo->userinfo->value->row['adres'], // почтовый адрес - улица, дом, квартира
-                    'countryid'  => (int)$xml->certinfo->userinfo->value->row['countryid'],
-                    'citid'      => (int)$xml->certinfo->userinfo->value->row['citid'],
-                    // паспортные данные
-                    'pnomer'     => (string)$xml->certinfo->userinfo->value->row['pnomer'], // серия и номер паспорта
-                    'pdate'      => new DateTime((string)$xml->certinfo->userinfo->value->row['pdate']), // дата выдачи паспорта
-                    'pcountry'   => (string)$xml->certinfo->userinfo->value->row['pcountry'], // государство, выдавшее паспорт
-                    'pcountryid' => (int)$xml->certinfo->userinfo->value->row['pcountryid'], // код государства, выдавшее паспорт
-                    'pcity'      => (string)$xml->certinfo->userinfo->value->row['pcity'],
-                    'pcitid'     => (int)$xml->certinfo->userinfo->value->row['pcitid'],
-                    'pbywhom'    => (string)$xml->certinfo->userinfo->value->row['pbywhom'], // код или наименование подразделения (органа), выдавшего паспорт
-                ],
-                // признак проверки персональных данных аттестатором и блокировки публичного отображения персональных данных.
-                // 00 - данное поле не проверено аттестатором и не заблокировано владельцем аттестата для публичного показа
-                // 01 - данное поле не проверено аттестатором и заблокировано владельцем аттестата для публичного показа
-                // 10 - данное поле проверено аттестатором и не заблокировано владельцем аттестата для публичного показа
-                // 11 - данное поле проверено аттестатором и заблокировано владельцем аттестата для публичного показа
-                'check-lock'   => [
-                    'ctype'       => (string)$xml->certinfo->userinfo->checklock->row['ctype'],
-                    'jstatus'     => (string)$xml->certinfo->userinfo->checklock->row['jstatus'],
-                    'osnovainfo'  => (string)$xml->certinfo->userinfo->checklock->row['osnovainfo'],
-                    'nickname'    => (string)$xml->certinfo->userinfo->checklock->row['nickname'],
-                    'infoopen'    => (string)$xml->certinfo->userinfo->checklock->row['infoopen'],
-                    'city'        => (string)$xml->certinfo->userinfo->checklock->row['city'],
-                    'region'      => (string)$xml->certinfo->userinfo->checklock->row['region'],
-                    'country'     => (string)$xml->certinfo->userinfo->checklock->row['country'],
-                    'adres'       => (string)$xml->certinfo->userinfo->checklock->row['adres'],
-                    'zipcode'     => (string)$xml->certinfo->userinfo->checklock->row['zipcode'],
-                    'fname'       => (string)$xml->certinfo->userinfo->checklock->row['fname'],
-                    'iname'       => (string)$xml->certinfo->userinfo->checklock->row['iname'],
-                    'oname'       => (string)$xml->certinfo->userinfo->checklock->row['oname'],
-                    'pnomer'      => (string)$xml->certinfo->userinfo->checklock->row['pnomer'],
-                    'pdate'       => (string)$xml->certinfo->userinfo->checklock->row['pdate'],
-                    'pbywhom'     => (string)$xml->certinfo->userinfo->checklock->row['pbywhom'],
-                    'pdateend'    => (string)$xml->certinfo->userinfo->checklock->row['pdateend'],
-                    'pcode'       => (string)$xml->certinfo->userinfo->checklock->row['pcode'],
-                    'pcountry'    => (string)$xml->certinfo->userinfo->checklock->row['pcountry'],
-                    'pcity'       => (string)$xml->certinfo->userinfo->checklock->row['pcity'],
-                    'ncountryid'  => (string)$xml->certinfo->userinfo->checklock->row['ncountryid'],
-                    'ncountry'    => (string)$xml->certinfo->userinfo->checklock->row['ncountry'],
-                    'rcountry'    => (string)$xml->certinfo->userinfo->checklock->row['rcountry'],
-                    'rcity'       => (string)$xml->certinfo->userinfo->checklock->row['rcity'],
-                    'radres'      => (string)$xml->certinfo->userinfo->checklock->row['radres'],
-                    'bplace'      => (string)$xml->certinfo->userinfo->checklock->row['bplace'],
-                    'bday'        => (string)$xml->certinfo->userinfo->checklock->row['bday'],
-                    'inn'         => (string)$xml->certinfo->userinfo->checklock->row['inn'],
-                    'name'        => (string)$xml->certinfo->userinfo->checklock->row['name'],
-                    'dirfio'      => (string)$xml->certinfo->userinfo->checklock->row['dirfio'],
-                    'buhfio'      => (string)$xml->certinfo->userinfo->checklock->row['buhfio'],
-                    'okpo'        => (string)$xml->certinfo->userinfo->checklock->row['okpo'],
-                    'okonx'       => (string)$xml->certinfo->userinfo->checklock->row['okonx'],
-                    'jadres'      => (string)$xml->certinfo->userinfo->checklock->row['jadres'],
-                    'jcountry'    => (string)$xml->certinfo->userinfo->checklock->row['jcountry'],
-                    'jcity'       => (string)$xml->certinfo->userinfo->checklock->row['jcity'],
-                    'jzipcode'    => (string)$xml->certinfo->userinfo->checklock->row['jzipcode'],
-                    'bankname'    => (string)$xml->certinfo->userinfo->checklock->row['bankname'],
-                    'bik'         => (string)$xml->certinfo->userinfo->checklock->row['bik'],
-                    'ks'          => (string)$xml->certinfo->userinfo->checklock->row['ks'],
-                    'rs'          => (string)$xml->certinfo->userinfo->checklock->row['rs'],
-                    'fax'         => (string)$xml->certinfo->userinfo->checklock->row['fax'],
-                    'email'       => (string)$xml->certinfo->userinfo->checklock->row['email'],
-                    'web'         => (string)$xml->certinfo->userinfo->checklock->row['web'],
-                    'phone'       => (string)$xml->certinfo->userinfo->checklock->row['phone'],
-                    'phonehome'   => (string)$xml->certinfo->userinfo->checklock->row['phonehome'],
-                    'phonemobile' => (string)$xml->certinfo->userinfo->checklock->row['phonemobile'],
-                    'icq'         => (string)$xml->certinfo->userinfo->checklock->row['icq'],
-                    'jabberid'    => (string)$xml->certinfo->userinfo->checklock->row['jabberid'],
-                    'sex'         => (string)$xml->certinfo->userinfo->checklock->row['sex'],
-                ],
-                // список веб-сайтов аттестата
-                'weblist'      => $weblists,
-                // дополнительные данные
-                'extendeddata' => $extendeddata,
-            ]
+        $data = [
+            'wmid' => $wmid,
         ];
+
+        $interface = new xml11($this->keeper);
+        $interface->storeData($data);
+
+        try {
+            $xml = $this->keeper->sendRequest($interface);
+        } catch (\Exception $e) {
+            return $this->fail($e->getMessage(), $e->getCode());
+        }
+
+        return $this->success($interface->getData($xml));
     }
 
     /**
@@ -1004,43 +373,20 @@ class WMXml
      */
     public function xml13($wmtranid)
     {
-        $reqn = $this->getReqn();
-        $sign = $this->getSign($wmtranid . $reqn);
+        $data = [
+            'wmtranid' => $wmtranid
+        ];
 
-        $xml = '
-            <w3s.request>
-                <reqn>' . $reqn . '</reqn>
-                <wmid>' . $this->wmid . '</wmid>
-                <sign>' . $sign . '</sign>
-                    <rejectprotect>
-                        <wmtranid>' . $wmtranid . '</wmtranid>
-                    </rejectprotect>
-            </w3s.request>
-        ';
+        $interface = new xml13($this->keeper);
+        $interface->storeData($data);
 
-        // получаем подпарщенный XML-пакет
         try {
-            $xml = $this->getObject("13", $xml);
-        } catch (Exception $e) {
-            return [
-                'is_error'      => 1,
-                'error_message' => $e->getMessage(),
-                'error_code'    => $e->getCode(),
-            ];
+            $xml = $this->keeper->sendRequest($interface);
+        } catch (\Exception $e) {
+            return $this->fail($e->getMessage(), $e->getCode());
         }
 
-        $opertype = (int)$xml->operation->opertype;
-
-        return [
-            'is_error' => 0,
-            'data'     => [
-                'id'       => (int)$xml->operation['id'],
-                'ts'       => (int)$xml->operation['ts'],
-                'opertype' => (int)$xml->operation->opertype,
-                'dateupd'  => new DateTime((string)$xml->operation->dateupd),
-                'success'  => (!$opertype) ? true : false,
-            ]
-        ];
+        return $this->success($interface->getData($xml));
     }
 
     /**
@@ -1053,134 +399,93 @@ class WMXml
      */
     public function xml14($wmtranid, $amount, $moneybackphone = null, $capitallerpursesrc = null)
     {
-        $reqn = $this->getReqn();
-        $sign = $this->getSign($reqn . $wmtranid . $amount);
+        $data = [
+            'wmtranid'           => $wmtranid,
+            'amount'             => $amount,
+            'moneybackphone'     => $moneybackphone,
+            'capitallerpursesrc' => $capitallerpursesrc
+        ];
 
-        $xml = '
-            <w3s.request>
-                <reqn>' . $reqn . '</reqn>
-                <wmid>' . $this->wmid . '</wmid>
-                <sign>' . $sign . '</sign>
-                    <trans>
-                        <inwmtranid>' . $wmtranid . '</inwmtranid>
-                        <amount>' . $amount . '</amount>
-                        <moneybackphone>' . $moneybackphone . '</moneybackphone>
-                        <capitallerpursesrc>' . $capitallerpursesrc . '</capitallerpursesrc>
-                    </trans>
-            </w3s.request>
-        ';
+        $interface = new xml14($this->keeper);
+        $interface->storeData($data);
 
-        // получаем подпарщенный XML-пакет
         try {
-            $xml = $this->getObject("14", $xml);
-        } catch (Exception $e) {
-            return [
-                'is_error'      => 1,
-                'error_message' => $e->getMessage(),
-                'error_code'    => $e->getCode(),
-            ];
+            $xml = $this->keeper->sendRequest($interface);
+        } catch (\Exception $e) {
+            return $this->fail($e->getMessage(), $e->getCode());
         }
 
-        return [
-            'is_error' => 0,
-            'data'     => [
-                'id'         => (int)$xml->operation['id'],
-                'ts'         => (int)$xml->operation['ts'],
-                'inwmtranid' => (int)$xml->operation->inwmtranid,
-                'pursesrc'   => (string)$xml->operation->pursesrc,
-                'pursedest'  => (string)$xml->operation->pursedest,
-                'amount'     => (float)$xml->operation->amount,
-                'desc'       => (string)$xml->operation->desc,
-                'datecrt'    => new DateTime((string)$xml->operation->datecrt),
-                'dateupd'    => new DateTime((string)$xml->operation->dateupd),
-            ]
+        return $this->success($interface->getData($xml));
+    }
+
+    /**
+     * XML: X15 [1], просмотр и изменение текущих настроек управления "по доверию"
+     * [1]: получение списка кошельков, управление которыми доверяет, идентификатор, совершающий запрос;
+     * [2]: получение списка идентификаторов и их кошельков, которые доверяют, идентификатору, совершающему запрос;
+     * [3]: создание или изменение настроек доверия для определённого кошелька или идентификатора;
+     * @param  string $wmid
+     * @return array
+     */
+    public function xml151($wmid = null)
+    {
+        $wmid = ($wmid) ? $wmid : $this->keeper->wmid;
+
+        $data = [
+            'wmid' => $wmid,
         ];
+
+        $interface = new xml151($this->keeper);
+        $interface->storeData($data);
+
+        try {
+            $xml = $this->keeper->sendRequest($interface);
+        } catch (\Exception $e) {
+            return $this->fail($e->getMessage(), $e->getCode());
+        }
+
+        return $this->success($interface->getData($xml));
     }
 
 
     /**
-     * XML: X15 [11,12], просмотр и изменение текущих настроек управления "по доверию"
-     * [11]: получение списка кошельков, управление которыми доверяет, идентификатор, совершающий запрос;
+     * XML: X15 [1], просмотр и изменение текущих настроек управления "по доверию"
+     * [11]:
      * [12]: получение списка идентификаторов и их кошельков, которые доверяют, идентификатору, совершающему запрос;
      * [2]: создание или изменение настроек доверия для определённого кошелька или идентификатора;
      * @param  string $wmid если необходимо просмотреть свои настройки, то указывать этот параметр не надо
      * @return array
      */
-    public function xml151($wmid = null)
+    public function xml152($wmid = null)
     {
-        // в зависимости от того передан нам WMID или нет - используем разные интерфейсы
-        $iwmid = ($wmid) ? $wmid : $this->wmid;
+        $wmid = ($wmid) ? $wmid : $this->keeper->wmid;
 
-        $reqn = $this->getReqn();
-        $sign = $this->getSign($iwmid . $reqn);
-
-        $xml = '
-            <w3s.request>
-                <reqn>' . $reqn . '</reqn>
-                <wmid>' . $this->wmid . '</wmid>
-                <sign>' . $sign . '</sign>
-                <gettrustlist>
-                    <wmid>' . $iwmid . '</wmid>
-                </gettrustlist>
-            </w3s.request>
-        ';
-
-        // получаем подпарщенный XML-пакет
-        try {
-            // если нет WMID - используем XMLTrustList.asp
-            // если есть WMID - используем XMLTrustList2.asp
-            if (!$wmid) {
-                $xml = $this->getObject("1511", $xml);
-            } else {
-                $xml = $this->getObject("1512", $xml);
-            }
-        } catch (Exception $e) {
-            return [
-                'is_error'      => 1,
-                'error_message' => $e->getMessage(),
-                'error_code'    => $e->getCode(),
-            ];
-        }
-
-        $trustlist = [];
-        foreach ($xml->trustlist->trust as $trust) {
-            $trustlist[] = [
-                'id'           => (int)$trust['id'],
-                'is_inv'       => ((int)$trust['inv']) ? true : false,
-                'is_trans'     => ((int)$trust['trans']) ? true : false,
-                'is_purse'     => ((int)$trust['purse']) ? true : false,
-                'is_transhist' => ((int)$trust['transhist']) ? true : false,
-                'master'       => (string)$trust->master,
-                'purse'        => (string)$trust->purse,
-                'daylimit'     => (float)$trust->daylimit,
-                'dlimit'       => (float)$trust->dlimit,
-                'wlimit'       => (float)$trust->wlimit,
-                'mlimit'       => (float)$trust->mlimit,
-                'dsum'         => (float)$trust->dsum,
-                'wsum'         => (float)$trust->wsum,
-                'msum'         => (float)$trust->msum,
-                'lastsumdate'  => (string)$trust->lastsumdate,
-                'storeswmid'   => (string)$trust->storeswmid,
-            ];
-        }
-
-        return [
-            'is_error' => 0,
-            'data'     => $trustlist
+        $data = [
+            'wmid' => $wmid,
         ];
+
+        $interface = new xml152($this->keeper);
+        $interface->storeData($data);
+
+        try {
+            $xml = $this->keeper->sendRequest($interface);
+        } catch (\Exception $e) {
+            return $this->fail($e->getMessage(), $e->getCode());
+        }
+
+        return $this->success($interface->getData($xml));
     }
 
     /**
-     * XML: X15 [2], создание или изменение настроек доверия для определённого кошелька или идентификатора
-     * [11]: получение списка кошельков, управление которыми доверяет, идентификатор, совершающий запрос;
-     * [12]: получение списка идентификаторов и их кошельков, которые доверяют, идентификатору, совершающему запрос;
-     * [2]: создание или изменение настроек доверия для определённого кошелька или идентификатора;
+     * XML: X15 [3], просмотр и изменение текущих настроек управления "по доверию"
+     * [1]: получение списка кошельков, управление которыми доверяет, идентификатор, совершающий запрос;
+     * [2]: получение списка идентификаторов и их кошельков, которые доверяют, идентификатору, совершающему запрос;
+     * [3]: создание или изменение настроек доверия для определённого кошелька или идентификатора;
+     * @param string $purse наш кошелёк, на который устанавливается доверие
      * @param bool|int $is_inv разрешить(1) или нет(0) идентификатору в теге masterwmid выпиcывать счета на доверяемый кошелек purse
      * @param bool|int $is_trans разрешить(1) или нет(0) идентификатору в теге masterwmid переводы средств по доверию с доверяемого кошелька purse
      * @param bool|int $is_purse разрешить(1) или нет(0) идентификатору в теге masterwmid просмотр баланса на доверяемом кошельке purse
      * @param bool|int $is_transhist разрешить(1) или нет(0) идентификатору в теге masterwmid просмотр истории операций кошелька purse
      * @param string $masterwmid WMID, которому мы данным запросом разрешает или запрещает управление своим кошельком slavepurse
-     * @param string $purse наш кошелёк, на который устанавливается доверие
      * @param float|int $limit суточный лимит
      * @param float|int $daylimit дневной лимит
      * @param float|int $weeklimit недельный лимит
@@ -1188,51 +493,31 @@ class WMXml
      * @return array
      * @throws Exception
      */
-    public function xml152($is_inv = 0, $is_trans = 0, $is_purse = 0, $is_transhist = 0, $masterwmid, $purse, $limit = 0, $daylimit = 0, $weeklimit = 0, $monthlimit = 0)
+    public function xml153($purse, $is_inv = 0, $is_trans = 0, $is_purse = 0, $is_transhist = 0, $masterwmid, $limit = 0, $daylimit = 0, $weeklimit = 0, $monthlimit = 0)
     {
-        $reqn = $this->getReqn();
-        $sign = $this->getSign($this->wmid . $purse . $masterwmid . $reqn);
+        $data = [
+            'purse'        => $purse,
+            'is_inv'       => $is_inv,
+            'is_trans'     => $is_trans,
+            'is_purse'     => $is_purse,
+            'is_transhist' => $is_transhist,
+            'masterwmid'   => $masterwmid,
+            'limit'        => $limit,
+            'daylimit'     => $daylimit,
+            'weeklimit'    => $weeklimit,
+            'monthlimit'   => $monthlimit
+        ];
 
-        $xml = '
-            <w3s.request>
-                <reqn>' . $reqn . '</reqn>
-                <wmid>' . $this->wmid . '</wmid>
-                <sign>' . $sign . '</sign>
-                <trust inv="' . $is_inv . '" trans="' . $is_trans . '" purse="' . $is_purse . '" transhist="' . $is_transhist . '">
-                    <masterwmid>' . $masterwmid . '</masterwmid>
-                    <slavewmid>' . $this->wmid . '</slavewmid>
-                    <purse>' . $purse . '</purse>
-                    <limit>' . $limit . '</limit>
-                    <daylimit>' . $daylimit . '</daylimit>
-                    <weeklimit>' . $weeklimit . '</weeklimit>
-                    <monthlimit>' . $monthlimit . '</monthlimit>
-                </trust>
-            </w3s.request>
-        ';
+        $interface = new xml153($this->keeper);
+        $interface->storeData($data);
 
-        // получаем подпарщенный XML-пакет
         try {
-            $xml = $this->getObject("152", $xml);
-        } catch (Exception $e) {
-            return [
-                'is_error'      => 1,
-                'error_message' => $e->getMessage(),
-                'error_code'    => $e->getCode(),
-            ];
+            $xml = $this->keeper->sendRequest($interface);
+        } catch (\Exception $e) {
+            return $this->fail($e->getMessage(), $e->getCode());
         }
 
-        return [
-            'is_error' => 0,
-            'data'     => [
-                'id'           => (int)$xml->trust['id'],
-                'is_inv'       => ((int)$xml->trust['inv']) ? true : false,
-                'is_trans'     => ((int)$xml->trust['trans']) ? true : false,
-                'is_purse'     => ((int)$xml->trust['purse']) ? true : false,
-                'is_transhist' => ((int)$xml->trust['transhist']) ? true : false,
-                'purse'        => (string)$xml->trust->purse,
-                'master'       => (string)$xml->trust->master,
-            ]
-        ];
+        return $this->success($interface->getData($xml));
     }
 
     /**
@@ -1247,48 +532,23 @@ class WMXml
      */
     public function xml171($name, $ctype, $text, array $accesslist = [])
     {
-        $name = htmlspecialchars(trim($name), ENT_QUOTES);
-        $text = htmlspecialchars(trim($text), ENT_QUOTES);
-
-        // ебануться, грёбанный полаллен!
-        $name_temp = mb_convert_encoding($name, "CP1251", "UTF-8");
-
-        $sign = $this->getSign($this->wmid . mb_strlen($name_temp) . $ctype);
-
-        $xml = '
-            <contract.request>
-                <sign_wmid>' . $this->wmid . '</sign_wmid>
-                <name>' . $name . '</name>
-                <ctype>' . $ctype . '</ctype>
-                <text><![CDATA[' . $text . ']]></text>
-                <sign>' . $sign . '</sign>
-                <accesslist>
-        ';
-        foreach ($accesslist as $wmid) {
-            $xml .= '<wmid>' . $wmid . '</wmid>';
-        }
-        $xml .= '
-                </accesslist>
-            </contract.request>
-        ';
-
-        // получаем подпарщенный XML-пакет
-        try {
-            $xml = $this->getObject("171", $xml);
-        } catch (Exception $e) {
-            return [
-                'is_error'      => 1,
-                'error_message' => $e->getMessage(),
-                'error_code'    => $e->getCode(),
-            ];
-        }
-
-        return [
-            'is_error' => 0,
-            'data'     => [
-                'contractid' => (int)$xml->contractid,
-            ]
+        $data = [
+            'name'       => $name,
+            'ctype'      => $ctype,
+            'text'       => $text,
+            'accesslist' => $accesslist
         ];
+
+        $interface = new xml171($this->keeper);
+        $interface->storeData($data);
+
+        try {
+            $xml = $this->keeper->sendRequest($interface);
+        } catch (\Exception $e) {
+            return $this->fail($e->getMessage(), $e->getCode());
+        }
+
+        return $this->success($interface->getData($xml));
     }
 
     /**
@@ -1303,47 +563,22 @@ class WMXml
         // для получения информации об акцептантах всегда указывать mode=acceptdate
         $mode = 'acceptdate';
 
-        $sign = $this->getSign($contractid . $mode);
-
-        $xml = '
-            <contract.request>
-                <wmid>' . $this->wmid . '</wmid>
-                <contractid>' . $contractid . '</contractid>
-                <mode>' . $mode . '</mode>
-                <sign>' . $sign . '</sign>
-            </contract.request>
-        ';
-
-        // получаем подпарщенный XML-пакет
-        try {
-            $xml = $this->getObject("172", $xml);
-        } catch (Exception $e) {
-            return [
-                'is_error'      => 1,
-                'error_message' => $e->getMessage(),
-                'error_code'    => $e->getCode(),
-            ];
-        }
-
-        $contractinfo = [];
-        foreach ($xml->contractinfo->row as $contract) {
-            $contractinfo[] = [
-                'contractid'     => (int)$contract['contractid'],
-                'wmid'           => (string)$contract['wmid'],
-                'acceptdate'     => (string)$contract['acceptdate'],
-                'signature'      => (string)$contract['signature'],
-                'smsacceptcode'  => (int)$contract['smsacceptcode'],
-                'smsacceptphone' => (string)$contract['smsacceptphone'],
-                'smsacceptdate'  => (string)$contract['smsacceptdate'],
-            ];
-        }
-
-        return [
-            'is_error' => 0,
-            'data'     => $contractinfo,
+        $data = [
+            'contractid' => $contractid,
+            'mode'       => $mode
         ];
-    }
 
+        $interface = new xml172($this->keeper);
+        $interface->storeData($data);
+
+        try {
+            $xml = $this->keeper->sendRequest($interface);
+        } catch (\Exception $e) {
+            return $this->fail($e->getMessage(), $e->getCode());
+        }
+
+        return $this->success($interface->getData($xml));
+    }
 
     /**
      * XML: X18, получение деталей операции через merchant.webmoney
@@ -1356,111 +591,26 @@ class WMXml
      */
     public function xml18($purse, $number, $wmid = null, $type = 0, $secret_key = null)
     {
-        $wmid = ($wmid) ? $wmid : $this->wmid;
+        $wmid = ($wmid) ? $wmid : $this->keeper->wmid;
 
-        $sign = null;
-        $md5 = null;
-
-        // аутентифицируемся через WMSigner
-        if (!$secret_key) {
-            $sign = $this->getSign($wmid . $purse . $number);
-        } // иначе используем MD5-алгоритм
-        else {
-            $md5 = md5($wmid . $purse . $number . $secret_key);
-        }
-
-        $xml = '
-            <merchant.request>
-                <wmid>' . $wmid . '</wmid>
-                <lmi_payee_purse>' . $purse . '</lmi_payee_purse>
-                <lmi_payment_no>' . $number . '</lmi_payment_no>
-                <lmi_payment_no_type>' . $type . '</lmi_payment_no_type>
-                <sign>' . $sign . '</sign>
-                <md5>' . $md5 . '</md5>
-            </merchant.request>
-        ';
-
-        // получаем подпарщенный XML-пакет
-        try {
-            $xml = $this->getObject("18", $xml);
-        } catch (Exception $e) {
-            return [
-                'is_error'      => 1,
-                'error_message' => $e->getMessage(),
-                'error_code'    => $e->getCode(),
-            ];
-        }
-
-        return [
-            'is_error' => 0,
-            'data'     => [
-                'wmtransid'       => (int)$xml->operation['wmtransid'],
-                'wminvoiceid'     => (int)$xml->operation['wminvoiceid'],
-                'amount'          => (float)$xml->operation->amount,
-                'operdate'        => (string)$xml->operation->operdate,
-                'purpose'         => (string)$xml->operation->purpose,
-                'pursefrom'       => (string)$xml->operation->pursefrom,
-                'wmidfrom'        => (string)$xml->operation->wmidfrom,
-                'capitallerflag'  => (int)$xml->operation->capitallerflag,
-                'enumflag'        => (int)$xml->operation->enumflag,
-                'IPAddress'       => (string)$xml->operation->IPAddress,
-                'telepat_phone'   => (string)$xml->operation->telepat_phone,
-                'telepat_paytype' => (int)$xml->operation->telepat_paytype,
-                'paymer_number'   => (int)$xml->operation->paymer_number,
-                'paymer_email'    => (string)$xml->operation->paymer_email,
-                'paymer_type'     => (int)$xml->operation->paymer_type,
-                'cashier_number'  => (int)$xml->operation->cashier_number,
-                'cashier_date'    => (string)$xml->operation->cashier_date,
-                'cashier_amount'  => (float)$xml->operation->cashier_amount,
-                'sdp_type'        => (int)$xml->operation->sdp_type,
-            ]
+        $data = [
+            'purse'      => $purse,
+            'number'     => $number,
+            'wmid'       => $wmid,
+            'type'       => $type,
+            'secret_key' => $secret_key
         ];
-    }
 
-    public function xml19($type, $pursetype, $amount, $wmid, array $userinfo, $direction = 1, $lang = "ru")
-    {
-        $amount = (float)$amount;
+        $interface = new xml18($this->keeper);
+        $interface->storeData($data);
 
-        $reqn = $this->getReqn();
-        $sign = $this->getSign($reqn . $type . $wmid);
-
-        $xml = '
-            <passport.request>
-                <reqn>' . $reqn . '</reqn>
-                <lang>' . $lang . '</lang>
-                <signerwmid>' . $this->wmid . '</signerwmid>
-                <sign>' . $sign . '</sign>
-                <operation>
-                    <type>' . $type . '</type>
-                    <direction>' . $direction . '</direction>
-                    <pursetype>' . $pursetype . '</pursetype>
-                    <amount>' . $amount . '</amount>
-                </operation>
-                <userinfo>
-                    <wmid>' . $wmid . '</wmid>
-                    <pnomer>' . $userinfo['pnomer'] . '</pnomer>
-                    <fname>' . $userinfo['fname'] . '</fname>
-                    <iname>' . $userinfo['iname'] . '</iname>
-                    <bank_name>' . $userinfo['bank_name'] . '</bank_name>
-                    <bank_account>' . $userinfo['bank_account'] . '</bank_account>
-                    <card_number>' . $userinfo['card_number'] . '</card_number>
-                    <emoney_name>' . $userinfo['emoney_name'] . '</emoney_name>
-                    <emoney_id>' . $userinfo['emoney_id'] . '</emoney_id>
-                    <phone>' . $userinfo['phone'] . '</phone>
-                </userinfo>
-            </passport.request>
-        ';
-
-        // получаем подпарщенный XML-пакет
         try {
-            $xml = $this->getObject("19", $xml);
-        } catch (Exception $e) {
-            return [
-                'is_error'      => 1,
-                'error_message' => $e->getMessage(),
-                'error_code'    => $e->getCode(),
-            ];
+            $xml = $this->keeper->sendRequest($interface);
+        } catch (\Exception $e) {
+            return $this->fail($e->getMessage(), $e->getCode());
         }
+
+        return $this->success($interface->getData($xml));
     }
 
     /**
@@ -1470,32 +620,22 @@ class WMXml
      */
     public function getBl($wmid = null)
     {
-        $wmid = ($wmid) ? $wmid : $this->wmid;
+        $wmid = ($wmid) ? $wmid : $this->keeper->wmid;
 
-        $xml = '
-            <WMIDLevel.request>
-                <signerwmid>' . $this->wmid . '</signerwmid>
-                <wmid>' . $wmid . '</wmid>
-            </WMIDLevel.request>
-        ';
+        $data = [
+            'wmid' => $wmid
+        ];
 
-        // получаем подпарщенный XML-пакет
+        $interface = new bl($this->keeper);
+        $interface->storeData($data);
+
         try {
-            $xml = $this->getObject("bl", $xml);
-        } catch (Exception $e) {
-            return [
-                'is_error'      => 1,
-                'error_message' => $e->getMessage(),
-                'error_code'    => $e->getCode(),
-            ];
+            $xml = $this->keeper->sendRequest($interface);
+        } catch (\Exception $e) {
+            return $this->fail($e->getMessage(), $e->getCode());
         }
 
-        return [
-            'is_error' => 0,
-            'data'     => [
-                'value' => (int)$xml->level,
-            ],
-        ];
+        return $this->success($interface->getData($xml));
     }
 
     /**
@@ -1505,36 +645,23 @@ class WMXml
      */
     public function getTl($wmid = null)
     {
-        $wmid = ($wmid) ? $wmid : $this->wmid;
+        $wmid = ($wmid) ? $wmid : $this->keeper->wmid;
 
-        $xml = '
-            <trustlimits>
-                <getlevels>
-                    <signerwmid>' . $this->wmid . '</signerwmid>
-                    <wmid>' . $wmid . '</wmid>
-                </getlevels>
-            </trustlimits>
-        ';
+        $data = [
+            'wmid' => $wmid
+        ];
 
-        // получаем подпарщенный XML-пакет
+        $interface = new tl($this->keeper);
+        $interface->storeData($data);
+
         try {
-            $xml = $this->getObject("tl", $xml);
-        } catch (Exception $e) {
-            return [
-                'is_error'      => 1,
-                'error_message' => $e->getMessage(),
-                'error_code'    => $e->getCode(),
-            ];
+            $xml = $this->keeper->sendRequest($interface);
+        } catch (\Exception $e) {
+            return $this->fail($e->getMessage(), $e->getCode());
         }
 
-        return [
-            'is_error' => 0,
-            'data'     => [
-                'value' => (int)$xml->tl['val'],
-            ],
-        ];
+        return $this->success($interface->getData($xml));
     }
-
 
     /**
      * UnDocumented: возвращает информацию о претензиях и отзывах в арбитраже
@@ -1543,29 +670,22 @@ class WMXml
      */
     public function getClaims($wmid = null)
     {
-        $wmid = ($wmid) ? $wmid : $this->wmid;
+        $wmid = ($wmid) ? $wmid : $this->keeper->wmid;
 
-        $xml = '
-            <request>
-                <wmid>' . $wmid . '</wmid>
-            </request>
-        ';
+        $data = [
+            'wmid' => $wmid
+        ];
 
-        // получаем подпарщенный XML-пакет
+        $interface = new claims($this->keeper);
+        $interface->storeData($data);
+
         try {
-            $xml = $this->getObject("claims", $xml);
-        } catch (Exception $e) {
-            return [
-                'is_error'      => 1,
-                'error_message' => $e->getMessage(),
-                'error_code'    => $e->getCode(),
-            ];
+            $xml = $this->keeper->sendRequest($interface);
+        } catch (\Exception $e) {
+            return $this->fail($e->getMessage(), $e->getCode());
         }
 
-        return [
-            'is_error' => 0,
-            'data'     => $xml,
-        ];
+        return $this->success($interface->getData($xml));
     }
 
     /**
@@ -1576,585 +696,39 @@ class WMXml
      */
     public function getInfo($search = null, $is_purse = false)
     {
-        $search = ($search) ? $search : $this->wmid;
+        $search = ($search) ? $search : $this->keeper->wmid;
 
-        $xml = '
-            <request>
-        ';
-        // мы проверяем кошелёк
-        if ($is_purse) {
-            $xml .= '<purse>' . $search . '</purse>';
-        } // мы проверяем wmid
-        else {
-            $xml .= '<wmid>' . $search . '</wmid>';
-        }
-        $xml .= '
-            </request>
-        ';
+        $data = [
+            'search'   => $search,
+            'is_purse' => $is_purse
+        ];
 
-        // получаем подпарщенный XML-пакет
+        $interface = new info($this->keeper);
+        $interface->storeData($data);
+
         try {
-            $xml = $this->getObject("wminfo", $xml);
-        } catch (Exception $e) {
-            return [
-                'is_error'      => 1,
-                'error_message' => $e->getMessage(),
-                'error_code'    => $e->getCode(),
-            ];
+            $xml = $this->keeper->sendRequest($interface);
+        } catch (\Exception $e) {
+            return $this->fail($e->getMessage(), $e->getCode());
         }
 
-        // собираем список wmid's
-        $wmids = [];
-        foreach ($xml->certinfo->wmids->row as $data) {
-            $wmids[] = [
-                'wmid'    => (string)$data['wmid'],
-                'level'   => (int)$data['level'],
-                'datereg' => (string)$data['datereg'],
-            ];
-        }
+        return $this->success($interface->getData($xml));
+    }
 
-        // собираем список userinfo's
-        $userinfo = [];
-        foreach ($xml->certinfo->userinfo->value->row as $data) {
-            $userinfo[] = [
-                'fname' => (string)$data['fname'],
-                'iname' => (string)$data['iname'],
-                'oname' => (string)$data['oname'],
-                'name'  => (string)$data['name'],
-            ];
-        }
-
-        // собираем список claims's
-        $claims = [];
-        foreach ($xml->certinfo->claims->row as $data) {
-            $claims[] = [
-                'posclaimscount' => (int)$data['posclaimscount'],
-                'negclaimscount' => (int)$data['negclaimscount'],
-                'claimslastdate' => (string)$data['claimslastdate'],
-            ];
-        }
-
-        // собираем список urls's
-        $urls = [];
-        foreach ($xml->certinfo->urls->row as $data) {
-            $urls[] = [
-                'attestaturl'          => (string)$data['attestaturl'],
-                'attestaticonurl'      => (string)$data['attestaticonurl'],
-                'attestatsmalliconurl' => (string)$data['attestatsmalliconurl'],
-                'claimsurl'            => (string)$data['claimsurl'],
-            ];
-        }
-
+    private function success($data)
+    {
         return [
             'is_error' => 0,
-            'data'     => [
-                'tid'      => (int)$xml->certinfo->attestat->row['tid'],
-                'typename' => (string)$xml->certinfo->attestat->row['typename'],
-                'wmids'    => $wmids,
-                'userinfo' => $userinfo,
-                'claims'   => $claims,
-                'urls'     => $urls,
-            ]
+            'data'     => $data
         ];
     }
 
-    /**
-     * Отправляет запрос к API через CURL
-     *
-     * @param  string $interface URL-адрес интерфейса
-     * @param  string $xml отправляемый XML-пакет
-     * @return string
-     * @throws Exception
-     * @throws \Exception
-     */
-    private function sendXml($interface, $xml)
+    private function fail($message, $code)
     {
-        curl_setopt_array($this->curl, [
-            CURLOPT_URL        => $this->getUrl($interface),
-            CURLOPT_POSTFIELDS => $xml,
-        ]);
-
-        // обрабатываем "тяжёлую" ошибку cURL
-        $result = curl_exec($this->curl);
-        if ($result === false) {
-            throw new \Exception(curl_error($this->curl) . print_r(curl_getinfo($this->curl), true), curl_errno($this->curl));
-        }
-
-        // а это "лёгкая" ошибка
-        if (empty($result)) {
-            throw new Exception("No incoming xml-data");
-        }
-
-        return $result;
-    }
-
-    /**
-     * Обращается к API, получает XML, распарсивает его и возвращает
-     *
-     * @param  string $interface URL-адрес интерфейса
-     * @param  string $xml отправляемый XML-пакет
-     * @return array
-     * @throws Exception
-     */
-    private function getObject($interface, $xml)
-    {
-        $result = $this->sendXml($interface, $xml);
-
-        // хак для XML11, не умею я обращаться к свойствам объекта, в которых есть дефис ;)
-        if ($interface == "11") {
-            $result = str_replace("check-lock", "checklock", $result);
-        }
-
-        $xml = simplexml_load_string($result);
-
-        // обрабатываем ошибку со стороны WebMoney
-        $error_code = (int)$xml->retval;
-
-        if ($interface == "11" || $interface == "wminfo") {
-            $error_code = (int)$xml['retval'];
-        }
-
-        // хак для XML8, всё нормально
-        if ($interface == "8" && $error_code == "1") {
-            $error_code = "0";
-        }
-
-        // запрос к WM API вызывал ошибку
-        if ($error_code) {
-            // пытаемся найти текст ошибки
-            $error = $this->getError($interface, $error_code);
-
-            // текст не нашли, а может в пакете чё есть...
-            if ($error === false && isset($xml->retdesc)) {
-                $error = $xml->retdesc;
-            }
-
-            throw new Exception($error, $error_code);
-        }
-
-        return $xml;
-    }
-
-    /**
-     * возвращает уникальный, увеличивающийся REQN
-     * @return integer
-     */
-    private function getReqn()
-    {
-        $time = microtime();
-        return substr($time, 11) . substr($time, 2, 5);
-    }
-
-    /**
-     * возвращает и инкрементирует транзакционный идентификатор платежа из файла tranid.txt
-     * @return int
-     * @throws \Exception
-     */
-    private function getTranid()
-    {
-        // а вдруг нам не указали путь до файла tranid.txt
-        if (empty($this->tranid)) {
-            throw new \Exception("Have not path tranid-file!");
-        }
-
-        $file = fopen($this->tranid, "r+");
-
-        $start = time(); // время старта попытки блокировки
-        // пытаемся получить блокировку в течении 3-х секунд
-        while ((time(true) - $start) < 3) {
-            $locked = flock($file, LOCK_EX);
-            // не удалось заблокировать файл
-            if (!$locked) {
-                // ну чтож, ждём 100мс
-                usleep(100000);
-            }
-        }
-
-        // не уалось получить блокировку
-        if (!$locked) {
-            throw new \Exception("Can't get lock tranid file");
-        }
-
-        $tranid = (int)fgets($file);
-        $tranid++;
-        rewind($file);
-        fwrite($file, $tranid);
-        fflush($file);
-        flock($file, LOCK_UN);
-        fclose($file);
-
-        return $tranid;
-    }
-
-    /**
-     * Обёртка над C и PHP подписчиками
-     * @param $string
-     * @return string
-     */
-    private function getSign($string)
-    {
-        // это PHP-подписчик
-        if (self::isPhpSigner($this->wmsigner)) {
-            return $this->phpSigner($string);
-        } // а это C-подписчик
-        else {
-            return $this->cSigner($string);
-        }
-    }
-
-    /**
-     * PHP-подписчик
-     *
-     * @param $string
-     * @return string
-     */
-    private function phpSigner($string)
-    {
-        return $this->wmsigner->sign($string);
-    }
-
-    /**
-     * C-подписчик: пишет в бинарный wmsigner и получает подписанную строку
-     *
-     * @param  string $string строка для подписи
-     * @return string
-     */
-    private function cSigner($string)
-    {
-        // если это WebMoney Keeper WebPro, то подписывать ему ничего не надо
-        if ($this->keeper == "light") {
-            return;
-        }
-
-        // мы должны быть в папке, т.к. там файл ключей и ini-файл
-        chdir(dirname($this->wmsigner));
-
-        $descriptorspec = [
-            0 => ["pipe", "r"],
-            1 => ["pipe", "w"],
-            2 => ["pipe", "r"]
+        return [
+            'is_error'      => 1,
+            'error_message' => $message,
+            'error_code'    => $code
         ];
-
-        $process = proc_open($this->wmsigner, $descriptorspec, $pipes);
-        fwrite($pipes[0], "$string\004\r\n");
-        fclose($pipes[0]);
-
-        $string = fgets($pipes[1], 133);
-        fclose($pipes[1]);
-        proc_close($process);
-
-        return $string;
-    }
-
-    /**
-     * @param $object
-     * @return bool
-     */
-    private static function isPhpSigner($object)
-    {
-        return $object instanceof Signer;
-    }
-
-    /**
-     * по идентификатору возвращает URL-адрес интерфейса
-     * @param  string $interface название интерфейса
-     * @return string
-     * @throws \Exception
-     */
-    private function getUrl($interface)
-    {
-        $url = [
-            // список URL для WM Keeper WinPro (Classic), использующий аутентификацию через ключи и wmsigner
-            "classic" => [
-                "1"      => "https://w3s.webmoney.ru/asp/XMLInvoice.asp",
-                "2"      => "https://w3s.webmoney.ru/asp/XMLTrans.asp",
-                "3"      => "https://w3s.webmoney.ru/asp/XMLOperations.asp",
-                "4"      => "https://w3s.webmoney.ru/asp/XMLOutInvoices.asp",
-                "5"      => "https://w3s.webmoney.ru/asp/XMLFinishProtect.asp",
-                "6"      => "https://w3s.webmoney.ru/asp/XMLSendMsg.asp",
-                "7"      => "https://w3s.webmoney.ru/asp/XMLClassicAuth.asp",
-                "8"      => "https://w3s.webmoney.ru/asp/XMLFindWMPurseNew.asp",
-                "9"      => "https://w3s.webmoney.ru/asp/XMLPurses.asp",
-                "10"     => "https://w3s.webmoney.ru/asp/XMLInInvoices.asp",
-                "11"     => "https://passport.webmoney.ru/asp/XMLGetWMPassport.asp",
-                "13"     => "https://w3s.webmoney.ru/asp/XMLRejectProtect.asp",
-                "14"     => "https://w3s.webmoney.ru/asp/XMLTransMoneyback.asp",
-                "1511"   => "https://w3s.webmoney.ru/asp/XMLTrustList.asp",
-                "1512"   => "https://w3s.webmoney.ru/asp/XMLTrustList2.asp",
-                "152"    => "https://w3s.webmoney.ru/asp/XMLTrustSave2.asp",
-                "16"     => "https://w3s.webmoney.ru/asp/XMLCreatePurse.asp",
-                "171"    => "https://arbitrage.webmoney.ru/xml/X17_CreateContract.aspx",
-                "172"    => "https://arbitrage.webmoney.ru/xml/X17_GetContractInfo.aspx",
-                "18"     => "https://merchant.webmoney.ru/conf/xml/XMLTransGet.asp",
-                "19"     => "https://apipassport.webmoney.ru/XMLCheckUser.aspx",
-                "201"    => "https://merchant.webmoney.ru/conf/xml/XMLTransRequest.asp",
-                "202"    => "https://merchant.webmoney.ru/conf/xml/XMLTransConfirm.asp",
-                "211"    => "https://merchant.webmoney.ru/conf/xml/XMLTrustRequest.asp",
-                "212"    => "https://merchant.webmoney.ru/conf/xml/XMLTrustConfirm.asp",
-                "22"     => "https://merchant.webmoney.ru/conf/xml/XMLTransSave.asp",
-
-                "bl"     => "https://stats.wmtransfer.com/levels/XMLWMIDLevel.aspx",
-                "tl"     => "https://debt.wmtransfer.com/xmlTrustLevelsGet.aspx",
-                "claims" => "http://arbitrage.webmoney.ru/asp/XMLGetWMIDClaims.asp",
-                "wminfo" => "https://passport.webmoney.ru/xml/XMLGetWMIDInfo.aspx",
-            ],
-
-            // список URL для WM Keeper WebPro (Light), использующий аутентификацию через сертификат
-            "light"   => [
-                "1"      => "https://w3s.wmtransfer.com/asp/XMLInvoiceCert.asp",
-                "2"      => "https://w3s.wmtransfer.com/asp/XMLTransCert.asp",
-                "3"      => "https://w3s.wmtransfer.com/asp/XMLOperationsCert.asp",
-                "4"      => "://w3s.webmoney.ru/asp/XMLOutInvoices.asp",
-                "5"      => "https://w3s.wmtransfer.com/asp/XMLFinishProtectCert.asp",
-                "6"      => "https://w3s.wmtransfer.com/asp/XMLSendMsgCert.asp",
-                "7"      => "https://w3s.wmtransfer.com/asp/XMLClassicAuthCert.asp",
-                "8"      => "https://w3s.wmtransfer.com/asp/XMLFindWMPurseCertNew.asp",
-                "9"      => "https://w3s.wmtransfer.com/asp/XMLPursesCert.asp",
-                "10"     => "https://w3s.webmoney.ru/asp/XMLInInvoicesCert.asp",
-                "11"     => "https://apipassport.webmoney.ru/asp/XMLGetWMPassport.asp",
-                "13"     => "https://w3s.wmtransfer.com/asp/XMLRejectProtectCert.asp",
-                "14"     => "https://w3s.wmtransfer.com/asp/XMLTransMoneybackCert.asp",
-                "151"    => "https://w3s.webmoney.ru/asp/XMLTrustListCert.asp",
-                "152"    => "https://w3s.webmoney.ru/asp/XMLTrustList2Cert.asp",
-                "153"    => "https://w3s.webmoney.ru/asp/XMLTrustSave2Cert.asp",
-                "16"     => "https://w3s.wmtransfer.com/asp/XMLCreatePurseCert.asp",
-                "171"    => "",
-                "172"    => "",
-                "18"     => "https://merchant.webmoney.ru/conf/xml/XMLTransGet.asp",
-                "19"     => "https://apipassportcrt.webmoney.ru/XMLCheckUserCert.aspx",
-                "201"    => "https://merchant.webmoney.ru/conf/xml/XMLTransRequest.asp",
-                "202"    => "https://merchant.webmoney.ru/conf/xml/XMLTransConfirm.asp",
-                "211"    => "https://merchant.wmtransfer.com/conf/xml/XMLTrustRequest.asp",
-                "212"    => "https://merchant.wmtransfer.com/conf/xml/XMLTrustConfirm.asp",
-                "22"     => "https://merchant.webmoney.ru/conf/xml/XMLTransSave.asp",
-
-                "bl"     => "https://stats.wmtransfer.com/levels/XMLWMIDLevel.aspx",
-                "tl"     => "https://debt.wmtransfer.com/xmlTrustLevelsGet.aspx",
-                "claims" => "http://arbitrage.webmoney.ru/asp/XMLGetWMIDClaims.asp",
-                "wminfo" => "https://passport.webmoney.ru/xml/XMLGetWMIDInfo.aspx",
-            ]
-        ];
-
-        if (!isset($url[$this->keeper][$interface])) {
-            throw new \Exception("Undefined API URL!");
-        }
-
-        if (empty($url[$this->keeper][$interface])) {
-            throw new \Exception("Incorrect API for this WebMoney Keeper!");
-        }
-
-        return $url[$this->keeper][$interface];
-    }
-
-    /**
-     * по номеру ошибки возвращает её текст
-     * @param  string $interface название интерфейса
-     * @param  integer $code код полученной ошибки
-     * @return string
-     */
-    private function getError($interface, $code)
-    {
-        $errors = [
-            "1"      => [
-                "-100" => "общая ошибка при разборе команды. неверный формат команды.",
-                "-9"   => "неверное значение поля w3s.request/reqn",
-                "-8"   => "неверное значение поля w3s.request/sign",
-                "-1"   => "неверное значение поля w3s.request/invoice/orderid",
-                "-2"   => "неверное значение поля w3s.request/invoice/customerwmid",
-                "-3"   => "неверное значение поля w3s.request/invoice/storepurse",
-                "-5"   => "неверное значение поля w3s.request/invoice/amount",
-                "-6"   => "слишком длинное поле w3s.request/invoice/desc",
-                "-7"   => "слишком длинное поле w3s.request/invoice/address",
-                "-11"  => "идентификатор, переданный в поле w3s.request/wmid не зарегистрирован",
-                "-12"  => "проверка подписи не прошла",
-                "102"  => "не выполнено условие постоянного увеличения значения параметра w3s.request/reqn",
-                "110"  => "нет прав на использования интерфейса; аттестат не удовлетворяет требованиям",
-                "111"  => "попытка выставление счета для кошелька не принадлежащего WMID, которым подписывается запрос; при этом доверие не установлено.",
-                "5"    => "отправитель счета не найден",
-                "6"    => "получатель счета не найден",
-                "7"    => "отправитель счета не найден",
-                "8"    => "кошелек w3s.request/invoice/storepurse принадлежит агрегатору платежей, но lmi_shop_id не указан или указан неверно",
-                "35"   => "плательщик не авторизован корреспондентом для выполнения данной операции. Это означает, что магазин пытается выписать счет плательщику, который, либо не добавил ВМИД магазина к себе в список корреспондентов и при этом запретил неавторизованным (не являющимся его корреспондентами) выписывать себе счета (для Кипер Классик - в главном меню вверху - Инструменты - Парметры программы -Ограничения ), либо плательщик добавил ВМИД магазина к себе в корреспонденты, но именно для ВМИДа этого магазина запретил выписку себе счетов. Без действий со стороны плательщика избежать этой ошибки магазин не может, необходимо показать плательщику ВМИД магазина с инструкцией о том, что ВМИД магазина должен быть добавлен плательщиком в список корреспондентов и для ВМИДа должна быть разрешена выписка счета",
-                "51"   => "кошелек продавца w3s.request/invoice/storepurse не имеет регистрации в каталоге Мегасток и при этом имеет лишь аттестат псевдонима, которого недостаточно для приема средств данным автоматизированным способом",
-                "52"   => "кошелек продавца w3s.request/invoice/storepurse не имеет регистрации в каталоге Мегасток и при этом имеет формальный аттестат у которого нет проверенного телефона и проверенной копии паспорта или ИНН и этого недостаточно для приема средств данным автоматизированным способом",
-                "54"   => "кошелек продавца w3s.request/invoice/storepurse не имеет регистрации в каталоге Мегасток и при этом превысил дневной лимит на прием средств автоматизированным способом",
-                "55"   => "кошелек продавца w3s.request/invoice/storepurse не имеет регистрации в каталоге Мегасток и при этом превысил недельный лимит на прием средств автоматизированным способом",
-                "56"   => "кошелек продавца w3s.request/invoice/storepurse не имеет регистрации в каталоге Мегасток и при этом превысил месячный лимит на прием средств автоматизированным способом",
-                "61"   => "Превышен лимит долговых обязательств заемщика",
-            ],
-
-            "2"      => [
-                "-100" => "общая ошибка при разборе команды. неверный формат команды.",
-                "-110" => "запросы отсылаются не с того IP адреса, который указан при регистрации данного интерфейса в Технической поддержке.",
-                "-1"   => "неверное значение поля w3s.request/reqn",
-                "-2"   => "неверное значение поля w3s.request/sign",
-                "-3"   => "неверное значение поля w3s.request/trans/tranid",
-                "-4"   => "неверное значение поля w3s.request/trans/pursesrc",
-                "-5"   => "неверное значение поля w3s.request/trans/pursedest",
-                "-6"   => "неверное значение поля w3s.request/trans/amount",
-                "-7"   => "неверное значение поля w3s.request/trans/desc",
-                "-8"   => "слишком длинное поле w3s.request/trans/pcode",
-                "-9"   => "поле w3s.request/trans/pcode не должно быть пустым если w3s.request/trans/period > 0",
-                "-10"  => "поле w3s.request/trans/pcode должно быть пустым если w3s.request/trans/period = 0",
-                "-11"  => "неверное значение поля w3s.request/trans/wminvid",
-                "-12"  => "идентификатор переданный в поле w3s.request/wmid не зарегистрирован",
-                "-14"  => "проверка подписи не прошла",
-                "-15"  => "неверное значение поля w3s.request/wmid",
-                "102"  => "не выполнено условие постоянного увеличения значения параметра w3s.request/reqn",
-                "103"  => "транзакция с таким значением поля w3s.request/trans/tranid уже выполнялась",
-                "110"  => "нет доступа к интерфейсу",
-                "111"  => "попытка перевода с кошелька не принадлежащего WMID, которым подписывается запрос; при этом доверие не установлено.",
-                "5"    => "идентификатор отправителя не найден",
-                "6"    => "корреспондент не найден",
-                "7"    => "кошелек получателя не найден",
-                "11"   => "кошелек отправителя не найден",
-                "13"   => "сумма транзакции должна быть больше нуля",
-                "17"   => "недостаточно денег в кошельке для выполнения операции",
-                "21"   => "счет, по которому совершается оплата не найден",
-                "22"   => "по указанному счету оплата с протекцией не возможна",
-                "25"   => "время действия оплачиваемого счета закончилось",
-                "26"   => "в операции должны участвовать разные кошельки",
-                "29"   => "типы кошельков отличаются",
-                "30"   => "кошелек не поддерживает прямой перевод",
-                "35"   => "плательщик не авторизован корреспондентом для выполнения данной операции",
-                "58"   => "превышен лимит средств на кошельках получателя",
-            ],
-
-            "3"      => [
-                "-100" => "общая ошибка при разборе команды. неверный формат команды.",
-                "-110" => "запросы отсылаются не с того IP адреса, который указан при регистрации данного интерфейса в Технической поддержке.",
-                "-1"   => "неверное значение поля w3s.request/wmid",
-                "-2"   => "неверное значение поля w3s.request/getoperations/purse",
-                "-3"   => "неверное значение поля w3s.request/sign",
-                "-4"   => "неверное значение поля w3s.request/reqn",
-                "-5"   => "проверка подписи не прошла",
-                "-7"   => "неверное значение поля w3s.request/getoperations/datestart",
-                "-8"   => "неверное значение поля w3s.request/getoperations/datefinish",
-                "-9"   => "WMID указанный в поле w3s.request/wmid не найден",
-                "102"  => "не выполнено условие постоянного увеличения значения параметра w3s.request/reqn",
-                "111"  => "попытка запроса истории по кошельку не принадлежащему WMID, которым подписывается запрос; при этом доверие не установлено.",
-                "1004" => "слишком большой диапазон выборки",
-            ],
-
-            "4"      => [
-                "111" => "попытка запроса информации по кошельку не принадлежащему WMID, которым подписывается запрос; при этом доверие не установлено.",
-            ],
-
-            "5"      => [
-                "20" => "20 - код протекции неверен, но кол-во попыток ввода кода (8) не исчерпано",
-            ],
-
-            "6"      => [
-                "-2"  => "Неверное значение поля message\\receiverwmid",
-                "-12" => "Подпись не верна",
-                "6"   => "корреспондент не найден",
-                "35"  => "получатель не принимает сообщения от неавторизованных корреспондентов",
-                "102" => "Не выполнено условие постоянного увеличения значения параметра w3s.request/reqn",
-            ],
-
-            "8"      => [
-                "-100" => "общая ошибка при разборе команды. неверный формат команды.",
-                "-2"   => "неверный WMId для проверки",
-            ],
-
-            "11"     => [
-                "1"  => "запрос не выполнен (неверный формат запроса)",
-                "2"  => "запрос не выполнен (неверно указан параметр passportwmid)",
-                "4"  => "запрос не выполнен (ошибка при проверке подписи)",
-                "11" => "запрос не выполнен (не указан один из параметров)",
-            ],
-
-            "13"     => [
-                "-100" => "общая ошибка при разборе команды. неверный формат команды.",
-                "-110" => "запросы отсылаются не с того IP адреса, который указан при регистрации данного интерфейса в Технической поддержке.",
-                "-1"   => "неверное значение поля w3s.request/reqn",
-                "-2"   => "неверное значение поля w3s.request/sign",
-                "-11"  => "неверное значение поля w3s.request/trans/wminvid",
-                "-12"  => "идентификатор переданный в поле w3s.request/wmid не зарегистрирован",
-                "-14"  => "проверка подписи не прошла",
-                "-15"  => "неверное значение поля w3s.request/wmid",
-                "102"  => "не выполнено условие постоянного увеличения значения параметра w3s.request/reqn",
-                "103"  => "транзакция с таким значением поля w3s.request/trans/tranid уже выполнялась",
-                "110"  => "нет доступа к интерфейсу",
-                "111"  => "попытка перевода с кошелька не принадлежащего WMID, которым подписывается запрос; при этом доверие не установлено.",
-                "5"    => "идентификатор отправителя не найден",
-                "6"    => "корреспондент не найден",
-                "17"   => "недостаточно денег в кошельке для выполнения операции",
-                "21"   => "счет, по которому совершается оплата не найден",
-                "22"   => "по указанному счету оплата с протекцией не возможна",
-                "25"   => "время действия оплачиваемого счета закончилось",
-                "30"   => "кошелек не поддерживает прямой перевод",
-                "35"   => "плательщик не авторизован корреспондентом для выполнения данной операции",
-                "58"   => "превышен лимит средств на кошельках получателя",
-            ],
-
-            "14"     => [
-                "17"  => "недостаточно средств на кошельке для осуществления возврата",
-                "50"  => "транзакция inwmtranid не найдена, возможно она была совершена несколько месяцев назад или это транзакция между кредитными кошельками",
-                "51"  => "транзакция inwmtranid имеет тип с протекцией (возвращенная или незавершенная), вернуть ее данным интерфейсом нельзя",
-                "52"  => "сумма транзакции inwmtranid меньше суммы переданной в теге запроса trans/amount, вернуть сумму больше исходной нельзя",
-                "53"  => "прошло более 30 дней с момента совершения транзакции inwmtranid",
-                "54"  => "транзакция выполнена с кошельков сервиса PAYMER при помощи ВМ-карты , ВМ-ноты или чека Пеймер, при этом параметр moneybackphone в запросе не был указан и возврат не может быть осуществлен, необходимо получить у покупателя номер мобильного телефона и передать его в moneybackphone , чтобы покупателю был сделан возврат на этот телефон в Сервис WebMoney Check",
-                "55"  => "транзакция выполнена через e-invoicing (параметр lmi_sdp_type в resulturl )а moneybackphone в запросе не был указан (при этом тип lmi_sdp_type платежа тако что в системе нет номера телефона покупателя) и возврат не может быть осуществлен, необходимо получить у покупателя номер мобильного телефона и передать его в moneybackphone , чтобы был сделан возврат на этот телефон в Сервис WebMoney Check",
-                "56"  => "сумма транзакции inwmtranid меньше суммы переданной в теге запроса trans/amount и сумм , которые возвращались в рамках транзакции inwmtranid ранее",
-                "103" => "транзакция с таким значением поля w3s.request/trans/tranid уже выполнялась на полную сумму возврата при первом же вызове",
-                "104" => "транзакция с таким значением поля w3s.request/trans/tranid и с такой же частичной суммой возврата уже выполнялась, второй раз можно вызвать частичный возврат в рамках этой исходной транзакции и на эту же сумму не ранее чем через полчаса",
-            ],
-
-            "18"     => [
-                "-100" => "общая ошибка при разборе запроса",
-                "-2"   => "merchant.request/wmid is incorrect",
-                "-2"   => "merchant.request/lmi_payee_purse is incorrect",
-                "-2"   => "merchant.request/lmi_payement_no is incorrect",
-                "-3"   => "merchant.request/lmi_payee_purse is incorrect",
-                "-2"   => "merchant.request/wmid is incorrect",
-                "-6"   => "sign not right",
-                "-7"   => "sign not right: PlanStr",
-                "-7"   => "MD5 or SHA256 not right:PlanStr(this planstr without secret_key)",
-                "-8"   => "Operation not found, internal error:error code",
-                "1"    => "Merchant purse not found:1",
-                "3"    => "Please use sign or sha256 method for authentication:3",
-                "2"    => "Please use sign or sha256 method for authentication, and specify secret key in merchant service settings:2",
-                "4"    => "Merchant wmid not found or security trust for purse is not exists:4",
-                "6"    => "Merchant wmid not found or security trust for purse is not exists:6",
-                "7"    => "Payment with lmi_payment_no number not found for this merchant purse:7",
-                "8"    => "Payment with lmi_payment_no (by merchant orderid number!) not found for this merchant purse",
-                "9"    => "Payment with lmi_payment_no number (by merchant orderid number!) found for this merchant purse, but not paid yet!",
-                "10"   => "Payment with lmi_payment_no number (by unique webmoney invoice number!) not found for this merchant purse",
-                "11"   => "Payment with lmi_payment_no number (by unique webmoney invoice number!) found for this merchant purse, but not paid yet!",
-                "12"   => "Payment with lmi_payment_no number (by unique webmoney transact number!) not found for this merchant purse",
-                "13"   => "Payment with lmi_payment_no number (by merchant orderid number!) found for this merchant purse, but it already reject!",
-                "14"   => "Payment with lmi_payment_no number (by unique webmoney invoice number!) found for this merchant purse, but it already reject!",
-            ],
-
-            "19"     => [
-                "2"   => "у signerwmid нет доступа к интерфейсу",
-                "403" => "запрос информации по участнику системы userinfo/wmid не возможен",
-                "404" => "указанные параметры не соответствуют участнику системы userinfo/wmid",
-                "405" => "участнику системы userinfo/wmid необходимо получить формальный (или выше) аттестат",
-                "406" => "запрос информации по бюджетным автоматам Capitaller не возможен",
-                "407" => "участнику системы userinfo/wmid необходимо загрузить на странице https://passport.webmoney.ru/asp/Upload.asp?ref=PCHECK цветную отсканированную копию страницы паспорта с фотографией и дождаться окончания ее проверки",
-                "408" => "на указанную банковскую платежную карту не разрешен вывод средств для участника системы userinfo/wmid, см. http://link.wmtransfer.com/1Q",
-                "409" => "с момента регистрации в системе userinfo/wmid еще не прошло 7 суток",
-                "410" => "с момента изменения номера паспорта участником userinfo/wmid еще не прошло 7 суток",
-                "415" => "участнику системы userinfo/wmid необходимо проверить свой телефон, см. https://passport.webmoney.ru/asp/mobilever.asp",
-                "416" => "пополнение баланса указанного телефона невозможно",
-                "417" => "пополнение баланса указанного телефона невозможно",
-                "418" => "пополнение баланса указанного телефона невозможно, превышен лимит для данного телефона",
-                "419" => "пополнение баланса указанного телефона невозможно, превышен лимит для отправителя",
-                "427" => "неверно указан номер телефона (номер некорректной длины)",
-                "428" => "телефон должен быть указан в международном формате (с кодом страны)",
-                "451" => "данная платежная система не поддерживается интерфейсом",
-                "452" => "неверно указан ID участника",
-                "499" => "превышен лимит запросов",
-                "500" => "не имеющая отдельного кода ошибка, подробности см. в значении retdesc",
-            ],
-
-            "wminfo" => [
-                "404" => "Данный идентификатор в системе не зарегистрирован",
-            ],
-        ];
-
-        return (isset($errors[$interface][$code])) ? $errors[$interface][$code] : "Undefined error #{$code} in interface #{$interface}";
     }
 }

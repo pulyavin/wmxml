@@ -13,11 +13,13 @@
 	"require": {
 		"php": ">=5.3",
 		"ext-curl": "*",
-        "ext-mbstring": "*"
+        "ext-mbstring": "*",
+        "pulyavin/streams": "~0",
+        "baibaratsky/php-wmsigner": "1.1.*"
 	},
 	"autoload": {
 		"psr-4": {
-			"pulyavin\\WebMoney\\": ""
+			"pulyavin\\wmxml\\": ""
 		}
 	}
 }
