@@ -28,7 +28,6 @@ class Keeper
     {
         $this->wmid = isset($data['wmid']) ? $data['wmid'] : null;
         $wmsigner = isset($data['wmsigner']) ? $data['wmsigner'] : null;
-        $rootca = isset($data['rootca']) ? $data['rootca'] : null;
         $tranid = isset($data['tranid']) ? $data['tranid'] : null;
         $key = isset($data['key']) ? $data['key'] : null;
 
@@ -39,14 +38,10 @@ class Keeper
             throw new \Exception("Unknown WMID");
         }
 
-        if (empty($rootca)) {
-            throw new \Exception("Unknown rootca-file path");
-        }
-
+        $rootca = dirname(__FILE__) . DIRECTORY_SEPARATOR . "WMUsedRootCAs.cer";
         if (!realpath($rootca)) {
-            throw new \Exception("Incorrect rootca-file path");
+            throw new \Exception("Can't find the file WMUsedRootCAs.cer in the modules folder");
         }
-
 
         // WebMoney Keeper: WinPro (Classic)
         if ($keeper_type == self::TYPE_CLASSIC) {

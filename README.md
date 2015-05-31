@@ -34,7 +34,6 @@ $wmxml = new pulyavin\wmxml\WMXml(
 	[
 		"wmid" => "323724870812",
 		"wmsigner" => "/wmsigner/wmsigner",
-		"rootca" => "./WMUsedRootCAs.cer",
 		"transid" => "./wmsigner/transid.txt",
 	]
 );
@@ -47,7 +46,6 @@ $wmxml = new pulyavin\wmxml\WMXml(
 	[
 		"wmid"     => "323724870812",
 		"wmsigner" => $wmsigner,
-		"rootca" => "./WMUsedRootCAs.cer",
 		"transid" => "./wmsigner/transid.txt",
 	]
 );
